@@ -23,8 +23,12 @@ try {
 // Initialize Vertex AI
 let vertexAI;
 try {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'your-project-id';
+  // GOOGLE_CLOUD_PROJECT will already include GOOGLE_CLOUD_PROJECT_ID fallback
+  // from the index.js file's normalization
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'civil-forge-403609';
   const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+  
+  logger.info(`Initializing Vertex AI with project ID: ${projectId}, location: ${location}`);
   
   vertexAI = new VertexAI({
     project: projectId,
@@ -51,7 +55,8 @@ async function getSecret(secretName) {
   }
 
   try {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+    // Use the normalized project ID from the environment variable
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'civil-forge-403609';
     if (!projectId) {
       logger.warn('GOOGLE_CLOUD_PROJECT environment variable not set');
       return null;
@@ -88,134 +93,125 @@ const imageGenerator = {
    */
   async generateImage(appraiser) {
     try {
-      // Generate data hash for caching purposes
+      // Generate appraiser data hash for caching
       const appraiserDataHash = this.generateAppraiserDataHash(appraiser);
+      logger.info(`Generating new image for appraiser: ${appraiser.id}`);
       
-      // Generate a detailed prompt using GPT-4o
-      const prompt = await this.createPromptWithGPT(appraiser);
+      // Create a prompt for the image generation
+      let prompt;
+      try {
+        // Try to use OpenAI API for generating a detailed prompt
+        prompt = await this.createPromptWithGPT(appraiser);
+      } catch (error) {
+        logger.warn(`OpenAI API Key not provided. Falling back to basic prompt generation.`);
+        logger.info(`In production, ensure OPEN_AI_API_SEO is available from Secret Manager`);
+        prompt = this.createBasicPrompt(appraiser);
+      }
       
-      // Ensure directories exist
-      const imageDir = path.join(__dirname, '../../data/images');
-      await fs.ensureDir(imageDir);
+      // Log the prompt (without PII)
+      const truncatedPrompt = prompt.length > 100 ? prompt.substring(0, 100) + '...' : prompt;
+      logger.info(`Sending prompt to Vertex AI: "${truncatedPrompt}"`);
       
+      // Get the image generation model name from env vars or use default
+      const modelName = process.env.IMAGEN_MODEL || 'imagegeneration@002';
+      logger.info(`Using Vertex AI model: ${modelName}`);
+      
+      // Check if Vertex AI is initialized
       if (!vertexAI) {
         throw new Error('Vertex AI client is not initialized');
       }
       
-      // Create a preview parameter for the Vertex Imagen model
-      logger.info(`Sending prompt to Vertex AI: "${prompt.substring(0, 100)}..."`);
+      let imageBase64;
       
-      // Get the generative model
-      const model = process.env.IMAGEN_MODEL || 'imagegeneration@002';
-      logger.info(`Using Vertex AI model: ${model}`);
-      
-      // Updated Vertex AI API call format
       try {
-        // Different approach to access the generative model based on API version
-        let imageResponse;
+        logger.info(`Attempting to use Vertex AI with compatible method for version 1.4.0`);
+        
+        // Get the location from environment or default to us-central1
+        const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+        const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+        
+        logger.info(`Using model ID: ${modelName}`);
+        
+        // For version 1.4.0, use the generativeModel approach
         try {
-          // For version 0.2.1 of @google-cloud/vertexai, we need to access the Generation API differently
-          logger.info('Attempting to use Vertex AI with compatible method for version 0.2.1');
+          const model = await vertexAI.preview.getGenerativeModel({
+            model: modelName,
+            generation: "generation",
+          });
           
-          // Initialize the Generation client
-          const aiplatformPath = '@google-cloud/vertexai';
-          const ai = require(aiplatformPath);
+          logger.info('Successfully created Vertex AI generative model using preview.getGenerativeModel');
           
-          // Get model name
-          const modelId = model;
-          logger.info(`Using model ID: ${modelId}`);
+          const result = await model.generateImages({
+            prompt: prompt,
+          });
           
-          // Create a Generation client directly with lower-level API
-          if (vertexAI.preview && typeof vertexAI.preview.generation === 'function') {
-            logger.info('Using Vertex AI preview.generation API');
-            const generation = vertexAI.preview.generation();
-            imageResponse = await generation.generateImage({
-              prompt: prompt,
-              modelId: modelId
-            });
-          } else if (vertexAI.generation && typeof vertexAI.generation === 'function') {
-            logger.info('Using Vertex AI generation API');
-            const generation = vertexAI.generation();
-            imageResponse = await generation.generateImage({
-              prompt: prompt,
-              modelId: modelId
-            });
+          // Extract base64 image data from response
+          if (result && result.images && result.images.length > 0) {
+            imageBase64 = result.images[0];
+            logger.info('Successfully generated image using Vertex AI preview.getGenerativeModel');
           } else {
-            // Try creating a completely new client
-            logger.info('Creating new Vertex AI Prediction client');
-            const { PredictionServiceClient } = require('@google-cloud/vertexai').v1;
-            const predictionClient = new PredictionServiceClient();
-            
-            const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'your-project-id';
-            const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
-            
-            const name = `projects/${projectId}/locations/${location}/models/${modelId}`;
-            logger.info(`Using model path: ${name}`);
-            
-            const instances = [{
-              prompt: prompt
-            }];
-            
-            const [predictionResponse] = await predictionClient.predict({
-              name,
-              instances: instances
+            throw new Error('No images returned from Vertex AI');
+          }
+        } catch (previewError) {
+          logger.warn(`Error using preview.getGenerativeModel: ${previewError.message}`);
+          logger.info('Trying alternative method: vertexAI.getGenerativeModel');
+          
+          try {
+            // Try the non-preview version
+            const model = await vertexAI.getGenerativeModel({
+              model: modelName,
             });
             
-            logger.info('Prediction response received');
-            imageResponse = {
-              images: [predictionResponse.predictions[0].bytesValue]
-            };
+            logger.info('Successfully created Vertex AI generative model using getGenerativeModel');
+            
+            const result = await model.generateImages({
+              prompt: prompt,
+            });
+            
+            // Extract base64 image data from response
+            if (result && result.images && result.images.length > 0) {
+              imageBase64 = result.images[0];
+              logger.info('Successfully generated image using Vertex AI getGenerativeModel');
+            } else {
+              throw new Error('No images returned from Vertex AI');
+            }
+          } catch (nonPreviewError) {
+            logger.warn(`Error using getGenerativeModel: ${nonPreviewError.message}`);
+            throw new Error(`All Vertex AI methods failed: ${previewError.message}, ${nonPreviewError.message}`);
           }
-          
-          logger.info('Image generation response received from Vertex AI');
-          logger.debug(`Response structure: ${JSON.stringify(Object.keys(imageResponse || {}))}`);
-          
-          // Extract the image data from the response, handling different response formats
-          let imageData;
-          if (imageResponse && imageResponse.response && Array.isArray(imageResponse.response.images)) {
-            imageData = imageResponse.response.images[0].bytes;
-            logger.info('Found image data in response.images[0].bytes');
-          } else if (imageResponse && Array.isArray(imageResponse.images)) {
-            imageData = imageResponse.images[0];
-            logger.info('Found image data in images[0]');
-          } else if (imageResponse && imageResponse.images && imageResponse.images.length > 0) {
-            imageData = imageResponse.images[0];
-            logger.info('Found image data in images[0]');
-          } else if (imageResponse && imageResponse.image) {
-            imageData = imageResponse.image;
-            logger.info('Found image data in image property');
-          } else {
-            throw new Error('Unexpected response format from Vertex AI: ' + JSON.stringify(imageResponse));
-          }
-          
-          // Save image to file system
-          const imageBuffer = Buffer.from(imageData, 'base64');
-          const filename = `appraiser_${appraiser.id}_${appraiserDataHash}.jpg`;
-          const filePath = path.join(imageDir, filename);
-          
-          await fs.writeFile(filePath, imageBuffer);
-          
-          // Return image data
-          const imageUrl = `/images/${filename}`;
-          
-          logger.info(`Successfully generated image for appraiser ${appraiser.id}`);
-          
-          return {
-            imageUrl,
-            imageBuffer,
-            appraiserDataHash,
-            prompt // Include the prompt in the response for reference
-          };
-        } catch (error) {
-          logger.error(`Error in Vertex AI image generation: ${error.message}`);
-          logger.error(error.stack);
-          throw new Error(`Failed to generate image using Vertex AI: ${error.message}`);
         }
       } catch (error) {
         logger.error(`Error in Vertex AI image generation: ${error.message}`);
-        logger.error(error.stack);
+        logger.error(error);
         throw new Error(`Failed to generate image using Vertex AI: ${error.message}`);
       }
+      
+      // Check if we got an image
+      if (!imageBase64) {
+        throw new Error('No image was generated by Vertex AI');
+      }
+      
+      // Convert base64 to buffer
+      const imageBuffer = Buffer.from(imageBase64, 'base64');
+      
+      // Save the image locally for caching
+      const fileName = `appraiser_${appraiser.id}_${new Date().getTime()}.jpg`;
+      const imagePath = path.join(__dirname, '../../data/images', fileName);
+      await fs.writeFile(imagePath, imageBuffer);
+      
+      // Generate URL for the image
+      const imageUrl = `/images/${fileName}`;
+      
+      logger.info(`Successfully generated image for appraiser ${appraiser.id}`);
+      
+      // Return the result
+      return {
+        success: true,
+        imageUrl,
+        imageBuffer,
+        prompt,
+        appraiserDataHash
+      };
     } catch (error) {
       logger.error(`Error generating image: ${error.message}`);
       throw new Error(`Failed to generate image: ${error.message}`);
@@ -408,124 +404,114 @@ const imageGenerator = {
    */
   async generateImageWithCustomPrompt(appraiser, customPrompt) {
     try {
-      // Generate data hash for caching purposes
+      // Generate appraiser data hash for caching
       const appraiserDataHash = this.generateAppraiserDataHash(appraiser);
+      logger.info(`Generating new image for appraiser: ${appraiser.id} with custom prompt`);
       
-      // Log the custom prompt
-      logger.info(`Using custom prompt for appraiser ${appraiser.id}: "${customPrompt.substring(0, 100)}..."`);
+      // Log the prompt (without PII)
+      const truncatedPrompt = customPrompt.length > 100 ? customPrompt.substring(0, 100) + '...' : customPrompt;
+      logger.info(`Sending custom prompt to Vertex AI: "${truncatedPrompt}"`);
       
-      // Ensure directories exist
-      const imageDir = path.join(__dirname, '../../data/images');
-      await fs.ensureDir(imageDir);
+      // Get the image generation model name from env vars or use default
+      const modelName = process.env.IMAGEN_MODEL || 'imagegeneration@002';
+      logger.info(`Using Vertex AI model: ${modelName}`);
       
+      // Check if Vertex AI is initialized
       if (!vertexAI) {
         throw new Error('Vertex AI client is not initialized');
       }
       
-      // Get the generative model
-      const model = process.env.IMAGEN_MODEL || 'imagegeneration@002';
-      logger.info(`Using Vertex AI model: ${model}`);
+      let imageBase64;
       
-      // Different approach to access the generative model based on API version
-      let imageResponse;
       try {
-        // For version 0.2.1 of @google-cloud/vertexai, we need to access the Generation API differently
-        logger.info('Attempting to use Vertex AI with compatible method for version 0.2.1');
+        logger.info(`Attempting to use Vertex AI with compatible method for version 1.4.0`);
         
-        // Initialize the Generation client
-        const aiplatformPath = '@google-cloud/vertexai';
-        const ai = require(aiplatformPath);
+        // Get the location from environment or default to us-central1
+        const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+        const projectId = process.env.GOOGLE_CLOUD_PROJECT;
         
-        // Get model name
-        const modelId = model;
-        logger.info(`Using model ID: ${modelId}`);
+        logger.info(`Using model ID: ${modelName}`);
         
-        // Create a Generation client directly with lower-level API
-        if (vertexAI.preview && typeof vertexAI.preview.generation === 'function') {
-          logger.info('Using Vertex AI preview.generation API');
-          const generation = vertexAI.preview.generation();
-          imageResponse = await generation.generateImage({
+        // For version 1.4.0, use the generativeModel approach
+        try {
+          const model = await vertexAI.preview.getGenerativeModel({
+            model: modelName,
+            generation: "generation",
+          });
+          
+          logger.info('Successfully created Vertex AI generative model using preview.getGenerativeModel');
+          
+          const result = await model.generateImages({
             prompt: customPrompt,
-            modelId: modelId
-          });
-        } else if (vertexAI.generation && typeof vertexAI.generation === 'function') {
-          logger.info('Using Vertex AI generation API');
-          const generation = vertexAI.generation();
-          imageResponse = await generation.generateImage({
-            prompt: customPrompt,
-            modelId: modelId
-          });
-        } else {
-          // Try creating a completely new client
-          logger.info('Creating new Vertex AI Prediction client');
-          const { PredictionServiceClient } = require('@google-cloud/vertexai').v1;
-          const predictionClient = new PredictionServiceClient();
-          
-          const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'your-project-id';
-          const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
-          
-          const name = `projects/${projectId}/locations/${location}/models/${modelId}`;
-          logger.info(`Using model path: ${name}`);
-          
-          const instances = [{
-            prompt: customPrompt
-          }];
-          
-          const [predictionResponse] = await predictionClient.predict({
-            name,
-            instances: instances
           });
           
-          logger.info('Prediction response received');
-          imageResponse = {
-            images: [predictionResponse.predictions[0].bytesValue]
-          };
+          // Extract base64 image data from response
+          if (result && result.images && result.images.length > 0) {
+            imageBase64 = result.images[0];
+            logger.info('Successfully generated image using Vertex AI preview.getGenerativeModel');
+          } else {
+            throw new Error('No images returned from Vertex AI');
+          }
+        } catch (previewError) {
+          logger.warn(`Error using preview.getGenerativeModel: ${previewError.message}`);
+          logger.info('Trying alternative method: vertexAI.getGenerativeModel');
+          
+          try {
+            // Try the non-preview version
+            const model = await vertexAI.getGenerativeModel({
+              model: modelName,
+            });
+            
+            logger.info('Successfully created Vertex AI generative model using getGenerativeModel');
+            
+            const result = await model.generateImages({
+              prompt: customPrompt,
+            });
+            
+            // Extract base64 image data from response
+            if (result && result.images && result.images.length > 0) {
+              imageBase64 = result.images[0];
+              logger.info('Successfully generated image using Vertex AI getGenerativeModel');
+            } else {
+              throw new Error('No images returned from Vertex AI');
+            }
+          } catch (nonPreviewError) {
+            logger.warn(`Error using getGenerativeModel: ${nonPreviewError.message}`);
+            throw new Error(`All Vertex AI methods failed: ${previewError.message}, ${nonPreviewError.message}`);
+          }
         }
-        
-        logger.info('Custom prompt image generation response received from Vertex AI');
-        logger.debug(`Response structure: ${JSON.stringify(Object.keys(imageResponse || {}))}`);
-        
-        // Extract the image data from the response, handling different response formats
-        let imageData;
-        if (imageResponse && imageResponse.response && Array.isArray(imageResponse.response.images)) {
-          imageData = imageResponse.response.images[0].bytes;
-          logger.info('Found image data in response.images[0].bytes');
-        } else if (imageResponse && Array.isArray(imageResponse.images)) {
-          imageData = imageResponse.images[0];
-          logger.info('Found image data in images[0]');
-        } else if (imageResponse && imageResponse.images && imageResponse.images.length > 0) {
-          imageData = imageResponse.images[0];
-          logger.info('Found image data in images[0]');
-        } else if (imageResponse && imageResponse.image) {
-          imageData = imageResponse.image;
-          logger.info('Found image data in image property');
-        } else {
-          throw new Error('Unexpected response format from Vertex AI: ' + JSON.stringify(imageResponse));
-        }
-        
-        // Save image to file system
-        const imageBuffer = Buffer.from(imageData, 'base64');
-        const filename = `appraiser_${appraiser.id}_${appraiserDataHash}_custom.jpg`;
-        const filePath = path.join(imageDir, filename);
-        
-        await fs.writeFile(filePath, imageBuffer);
-        
-        // Return image data
-        const imageUrl = `/images/${filename}`;
-        
-        logger.info(`Successfully generated image with custom prompt for appraiser ${appraiser.id}`);
-        
-        return {
-          imageUrl,
-          imageBuffer,
-          appraiserDataHash,
-          prompt: customPrompt
-        };
       } catch (error) {
-        logger.error(`Error in Vertex AI custom prompt image generation: ${error.message}`);
-        logger.error(error.stack);
-        throw new Error(`Failed to generate image with custom prompt using Vertex AI: ${error.message}`);
+        logger.error(`Error in Vertex AI image generation: ${error.message}`);
+        logger.error(error);
+        throw new Error(`Failed to generate image using Vertex AI: ${error.message}`);
       }
+      
+      // Check if we got an image
+      if (!imageBase64) {
+        throw new Error('No image was generated by Vertex AI');
+      }
+      
+      // Convert base64 to buffer
+      const imageBuffer = Buffer.from(imageBase64, 'base64');
+      
+      // Save the image locally for caching
+      const fileName = `appraiser_${appraiser.id}_${new Date().getTime()}.jpg`;
+      const imagePath = path.join(__dirname, '../../data/images', fileName);
+      await fs.writeFile(imagePath, imageBuffer);
+      
+      // Generate URL for the image
+      const imageUrl = `/images/${fileName}`;
+      
+      logger.info(`Successfully generated image for appraiser ${appraiser.id} with custom prompt`);
+      
+      // Return the result
+      return {
+        success: true,
+        imageUrl,
+        imageBuffer,
+        prompt: customPrompt,
+        appraiserDataHash
+      };
     } catch (error) {
       logger.error(`Error generating image with custom prompt: ${error.message}`);
       throw new Error(`Failed to generate image with custom prompt: ${error.message}`);

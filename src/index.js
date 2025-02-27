@@ -67,6 +67,8 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     googleCloudProject: process.env.GOOGLE_CLOUD_PROJECT ? 'configured' : 'not configured',
+    googleCloudProjectSource: process.env.GOOGLE_CLOUD_PROJECT_ID ? 'GOOGLE_CLOUD_PROJECT_ID' : 
+                              process.env.GOOGLE_CLOUD_PROJECT ? 'GOOGLE_CLOUD_PROJECT' : 'default fallback',
     imagekitConfigured: process.env.IMAGEKIT_PUBLIC_KEY ? true : false,
     openaiConfigured: process.env.OPEN_AI_API_SEO ? true : false,
   };
@@ -85,12 +87,12 @@ app.post('/api/generate', async (req, res) => {
     
     logger.info(`Received request to generate image for appraiser: ${appraiser.id}`);
     
-    // Check if GOOGLE_CLOUD_PROJECT is set
+    // Check if Google Cloud Project ID is set (we already normalize this in the beginning)
     if (!process.env.GOOGLE_CLOUD_PROJECT) {
-      logger.error('Cannot generate image: GOOGLE_CLOUD_PROJECT environment variable is not set');
+      logger.error('Cannot generate image: Neither GOOGLE_CLOUD_PROJECT nor GOOGLE_CLOUD_PROJECT_ID environment variables are set');
       return res.status(500).json({ 
         error: 'Configuration error',
-        message: 'The service is not properly configured. GOOGLE_CLOUD_PROJECT is required for Vertex AI.'
+        message: 'The service is not properly configured. Either GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID is required for Vertex AI.'
       });
     }
     
