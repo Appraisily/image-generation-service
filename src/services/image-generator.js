@@ -113,7 +113,7 @@ const imageGenerator = {
       logger.info(`Sending prompt to Vertex AI: "${truncatedPrompt}"`);
       
       // Get the image generation model name from env vars or use default
-      const modelName = process.env.IMAGEN_MODEL || 'imagegeneration@002';
+      const modelName = process.env.IMAGEN_MODEL || 'imagen-3.0-generate-002';
       logger.info(`Using Vertex AI model: ${modelName}`);
       
       // Check if Vertex AI is initialized
@@ -132,54 +132,67 @@ const imageGenerator = {
         
         logger.info(`Using model ID: ${modelName}`);
         
-        // For version 1.4.0, use the generativeModel approach
         try {
-          const model = await vertexAI.preview.getGenerativeModel({
-            model: modelName,
-          });
+          // Direct API call to Imagen 3 model
+          logger.info('Attempting direct API call to Imagen 3 model');
           
-          logger.info('Successfully created Vertex AI generative model using preview.getGenerativeModel');
+          // Create prediction client
+          const { PredictionServiceClient } = require('@google-cloud/aiplatform');
+          const predictionClient = new PredictionServiceClient();
           
-          // Use generateContent instead of generateImages
-          const result = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          });
+          const endpoint = `projects/${projectId}/locations/${location}/publishers/google/models/${modelName}`;
           
-          // Extract image data from response
-          if (result && 
-              result.response && 
-              result.response.candidates && 
-              result.response.candidates[0] && 
-              result.response.candidates[0].content && 
-              result.response.candidates[0].content.parts && 
-              result.response.candidates[0].content.parts[0] && 
-              result.response.candidates[0].content.parts[0].inlineData && 
-              result.response.candidates[0].content.parts[0].inlineData.data) {
-            imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
-            logger.info('Successfully generated image using Vertex AI preview.getGenerativeModel');
+          // Format the request for the Imagen 3 API
+          const request = {
+            endpoint,
+            instances: [
+              {
+                prompt: prompt
+              }
+            ],
+            parameters: {
+              sampleCount: 1,
+              // The following params are optional but can be adjusted based on needs
+              // negativePrompt: "blurry, distorted, low quality",
+              // enhancePrompt: true
+            }
+          };
+          
+          logger.info(`Sending prediction request to ${modelName}`);
+          const [response] = await predictionClient.predict(request);
+          
+          if (response && 
+              response.predictions && 
+              response.predictions.length > 0 && 
+              response.predictions[0].bytesBase64Encoded) {
+            
+            imageBase64 = response.predictions[0].bytesBase64Encoded;
+            logger.info(`Successfully generated image using Imagen 3 model: ${modelName}`);
           } else {
-            logger.warn('Unexpected response structure from Vertex AI');
-            logger.warn(JSON.stringify(result));
-            throw new Error('Unexpected response structure from Vertex AI');
+            logger.warn('Unexpected response structure from Imagen 3 API');
+            logger.warn(JSON.stringify(response));
+            throw new Error('Unexpected response structure from Imagen 3 API');
           }
-        } catch (previewError) {
-          logger.warn(`Error using preview.getGenerativeModel: ${previewError.message}`);
-          logger.info('Trying alternative method: vertexAI.getGenerativeModel');
+        } catch (directApiError) {
+          logger.warn(`Error using direct Imagen 3 API: ${directApiError.message}`);
           
+          // Fallback to generative model interface if direct API fails
           try {
-            // Try the non-preview version
-            const model = await vertexAI.getGenerativeModel({
+            logger.info('Falling back to generativeModel interface');
+            
+            // Try using the preview API first
+            const model = await vertexAI.preview.getGenerativeModel({
               model: modelName,
             });
             
-            logger.info('Successfully created Vertex AI generative model using getGenerativeModel');
+            logger.info('Successfully created Imagen 3 model using preview.getGenerativeModel');
             
-            // Use generateContent instead of generateImages
+            // Use generateContent for Imagen 3
             const result = await model.generateContent({
               contents: [{ role: 'user', parts: [{ text: prompt }] }],
             });
             
-            // Extract image data from response
+            // Extract image data from response based on Imagen 3 response format
             if (result && 
                 result.response && 
                 result.response.candidates && 
@@ -190,15 +203,47 @@ const imageGenerator = {
                 result.response.candidates[0].content.parts[0].inlineData && 
                 result.response.candidates[0].content.parts[0].inlineData.data) {
               imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
-              logger.info('Successfully generated image using Vertex AI getGenerativeModel');
+              logger.info('Successfully generated image using Imagen 3 with preview.getGenerativeModel');
             } else {
-              logger.warn('Unexpected response structure from Vertex AI');
+              logger.warn('Unexpected response structure from Imagen 3 using generative model API');
               logger.warn(JSON.stringify(result));
-              throw new Error('Unexpected response structure from Vertex AI');
+              throw new Error('Unexpected response structure from Imagen 3 using generative model API');
             }
-          } catch (nonPreviewError) {
-            logger.warn(`Error using getGenerativeModel: ${nonPreviewError.message}`);
-            throw new Error(`All Vertex AI methods failed: ${previewError.message}, ${nonPreviewError.message}`);
+          } catch (previewError) {
+            logger.warn(`Error using preview API with Imagen 3: ${previewError.message}`);
+            
+            // Try the non-preview API as final fallback
+            try {
+              const model = await vertexAI.getGenerativeModel({
+                model: modelName,
+              });
+              
+              logger.info('Successfully created Imagen 3 model using getGenerativeModel');
+              
+              const result = await model.generateContent({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+              });
+              
+              if (result && 
+                  result.response && 
+                  result.response.candidates && 
+                  result.response.candidates[0] && 
+                  result.response.candidates[0].content && 
+                  result.response.candidates[0].content.parts && 
+                  result.response.candidates[0].content.parts[0] && 
+                  result.response.candidates[0].content.parts[0].inlineData && 
+                  result.response.candidates[0].content.parts[0].inlineData.data) {
+                imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
+                logger.info('Successfully generated image using Imagen 3 with getGenerativeModel');
+              } else {
+                logger.warn('Unexpected response structure from Imagen 3');
+                logger.warn(JSON.stringify(result));
+                throw new Error('Unexpected response structure from Imagen 3');
+              }
+            } catch (nonPreviewError) {
+              logger.warn(`Error using non-preview API with Imagen 3: ${nonPreviewError.message}`);
+              throw new Error(`All Imagen 3 methods failed: ${directApiError.message}, ${previewError.message}, ${nonPreviewError.message}`);
+            }
           }
         }
       } catch (error) {
@@ -433,8 +478,8 @@ const imageGenerator = {
       const truncatedPrompt = customPrompt.length > 100 ? customPrompt.substring(0, 100) + '...' : customPrompt;
       logger.info(`Sending custom prompt to Vertex AI: "${truncatedPrompt}"`);
       
-      // Get the image generation model name from env vars or use default
-      const modelName = process.env.IMAGEN_MODEL || 'imagegeneration@002';
+      // Get the image generation model name from env vars or use default (now using Imagen 3)
+      const modelName = process.env.IMAGEN_MODEL || 'imagen-3.0-generate-002';
       logger.info(`Using Vertex AI model: ${modelName}`);
       
       // Check if Vertex AI is initialized
@@ -451,56 +496,67 @@ const imageGenerator = {
         const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
         const projectId = process.env.GOOGLE_CLOUD_PROJECT;
         
-        logger.info(`Using model ID: ${modelName}`);
-        
-        // For version 1.4.0, use the generativeModel approach
         try {
-          const model = await vertexAI.preview.getGenerativeModel({
-            model: modelName,
-          });
+          // Direct API call to Imagen 3 model
+          logger.info('Attempting direct API call to Imagen 3 model for custom prompt');
           
-          logger.info('Successfully created Vertex AI generative model using preview.getGenerativeModel');
+          // Create prediction client
+          const { PredictionServiceClient } = require('@google-cloud/aiplatform');
+          const predictionClient = new PredictionServiceClient();
           
-          // Use generateContent instead of generateImages
-          const result = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: customPrompt }] }],
-          });
+          const endpoint = `projects/${projectId}/locations/${location}/publishers/google/models/${modelName}`;
           
-          // Extract image data from response
-          if (result && 
-              result.response && 
-              result.response.candidates && 
-              result.response.candidates[0] && 
-              result.response.candidates[0].content && 
-              result.response.candidates[0].content.parts && 
-              result.response.candidates[0].content.parts[0] && 
-              result.response.candidates[0].content.parts[0].inlineData && 
-              result.response.candidates[0].content.parts[0].inlineData.data) {
-            imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
-            logger.info('Successfully generated image using Vertex AI preview.getGenerativeModel');
+          // Format the request for the Imagen 3 API
+          const request = {
+            endpoint,
+            instances: [
+              {
+                prompt: customPrompt
+              }
+            ],
+            parameters: {
+              sampleCount: 1,
+              // The following params are optional but can be adjusted based on needs
+              // negativePrompt: "blurry, distorted, low quality",
+              // enhancePrompt: true
+            }
+          };
+          
+          logger.info(`Sending prediction request to ${modelName} with custom prompt`);
+          const [response] = await predictionClient.predict(request);
+          
+          if (response && 
+              response.predictions && 
+              response.predictions.length > 0 && 
+              response.predictions[0].bytesBase64Encoded) {
+            
+            imageBase64 = response.predictions[0].bytesBase64Encoded;
+            logger.info(`Successfully generated image using Imagen 3 model: ${modelName} with custom prompt`);
           } else {
-            logger.warn('Unexpected response structure from Vertex AI');
-            logger.warn(JSON.stringify(result));
-            throw new Error('Unexpected response structure from Vertex AI');
+            logger.warn('Unexpected response structure from Imagen 3 API');
+            logger.warn(JSON.stringify(response));
+            throw new Error('Unexpected response structure from Imagen 3 API');
           }
-        } catch (previewError) {
-          logger.warn(`Error using preview.getGenerativeModel: ${previewError.message}`);
-          logger.info('Trying alternative method: vertexAI.getGenerativeModel');
+        } catch (directApiError) {
+          logger.warn(`Error using direct Imagen 3 API: ${directApiError.message}`);
           
+          // Fallback to generative model interface if direct API fails
           try {
-            // Try the non-preview version
-            const model = await vertexAI.getGenerativeModel({
+            logger.info('Falling back to generativeModel interface for custom prompt');
+            
+            // Try using the preview API first
+            const model = await vertexAI.preview.getGenerativeModel({
               model: modelName,
             });
             
-            logger.info('Successfully created Vertex AI generative model using getGenerativeModel');
+            logger.info('Successfully created Imagen 3 model using preview.getGenerativeModel for custom prompt');
             
-            // Use generateContent instead of generateImages
+            // Use generateContent for Imagen 3
             const result = await model.generateContent({
               contents: [{ role: 'user', parts: [{ text: customPrompt }] }],
             });
             
-            // Extract image data from response
+            // Extract image data from response based on Imagen 3 response format
             if (result && 
                 result.response && 
                 result.response.candidates && 
@@ -511,15 +567,47 @@ const imageGenerator = {
                 result.response.candidates[0].content.parts[0].inlineData && 
                 result.response.candidates[0].content.parts[0].inlineData.data) {
               imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
-              logger.info('Successfully generated image using Vertex AI getGenerativeModel');
+              logger.info('Successfully generated image using Imagen 3 with preview.getGenerativeModel for custom prompt');
             } else {
-              logger.warn('Unexpected response structure from Vertex AI');
+              logger.warn('Unexpected response structure from Imagen 3 using generative model API');
               logger.warn(JSON.stringify(result));
-              throw new Error('Unexpected response structure from Vertex AI');
+              throw new Error('Unexpected response structure from Imagen 3 using generative model API');
             }
-          } catch (nonPreviewError) {
-            logger.warn(`Error using getGenerativeModel: ${nonPreviewError.message}`);
-            throw new Error(`All Vertex AI methods failed: ${previewError.message}, ${nonPreviewError.message}`);
+          } catch (previewError) {
+            logger.warn(`Error using preview API with Imagen 3: ${previewError.message}`);
+            
+            // Try the non-preview API as final fallback
+            try {
+              const model = await vertexAI.getGenerativeModel({
+                model: modelName,
+              });
+              
+              logger.info('Successfully created Imagen 3 model using getGenerativeModel for custom prompt');
+              
+              const result = await model.generateContent({
+                contents: [{ role: 'user', parts: [{ text: customPrompt }] }],
+              });
+              
+              if (result && 
+                  result.response && 
+                  result.response.candidates && 
+                  result.response.candidates[0] && 
+                  result.response.candidates[0].content && 
+                  result.response.candidates[0].content.parts && 
+                  result.response.candidates[0].content.parts[0] && 
+                  result.response.candidates[0].content.parts[0].inlineData && 
+                  result.response.candidates[0].content.parts[0].inlineData.data) {
+                imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
+                logger.info('Successfully generated image using Imagen 3 with getGenerativeModel for custom prompt');
+              } else {
+                logger.warn('Unexpected response structure from Imagen 3');
+                logger.warn(JSON.stringify(result));
+                throw new Error('Unexpected response structure from Imagen 3');
+              }
+            } catch (nonPreviewError) {
+              logger.warn(`Error using non-preview API with Imagen 3: ${nonPreviewError.message}`);
+              throw new Error(`All Imagen 3 methods failed: ${directApiError.message}, ${previewError.message}, ${nonPreviewError.message}`);
+            }
           }
         }
       } catch (error) {
