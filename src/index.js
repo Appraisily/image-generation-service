@@ -28,6 +28,14 @@ const PORT = process.env.PORT || 3000;
   }
 })();
 
+// Check critical environment variables
+if (!process.env.GOOGLE_CLOUD_PROJECT) {
+  logger.error('GOOGLE_CLOUD_PROJECT environment variable is not set');
+  logger.error('This is required for Vertex AI and Secret Manager to work properly');
+  logger.error('Please set this variable in your .env file or in your Cloud Run configuration');
+  // We'll continue execution, but log a clear warning
+}
+
 // Log environment configuration without exposing sensitive information
 logger.info(`Starting service with configuration:`);
 logger.info(`- NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
@@ -51,7 +59,16 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  const healthStatus = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    googleCloudProject: process.env.GOOGLE_CLOUD_PROJECT ? 'configured' : 'not configured',
+    imagekitConfigured: process.env.IMAGEKIT_PUBLIC_KEY ? true : false,
+    openaiConfigured: process.env.OPEN_AI_API_SEO ? true : false,
+  };
+  
+  res.status(200).json(healthStatus);
 });
 
 // Generate image endpoint
@@ -64,6 +81,15 @@ app.post('/api/generate', async (req, res) => {
     }
     
     logger.info(`Received request to generate image for appraiser: ${appraiser.id}`);
+    
+    // Check if GOOGLE_CLOUD_PROJECT is set
+    if (!process.env.GOOGLE_CLOUD_PROJECT) {
+      logger.error('Cannot generate image: GOOGLE_CLOUD_PROJECT environment variable is not set');
+      return res.status(500).json({ 
+        error: 'Configuration error',
+        message: 'The service is not properly configured. GOOGLE_CLOUD_PROJECT is required for Vertex AI.'
+      });
+    }
     
     // Check cache first
     const cachedImage = await imageCache.getFromCache(appraiser.id);

@@ -111,73 +111,106 @@ const imageGenerator = {
       
       // Updated Vertex AI API call format
       try {
-        // Create the prediction service client
-        const generationConfig = {
-          model: model,
-        };
-        
         // Different approach to access the generative model based on API version
         let imageResponse;
-        if (typeof vertexAI.preview === 'object' && typeof vertexAI.preview.generateImage === 'function') {
-          // Using preview API
-          logger.info('Using Vertex AI preview API');
-          imageResponse = await vertexAI.preview.generateImage({
-            prompt: prompt,
-            modelId: model
-          });
-        } else if (typeof vertexAI.getGenerativeModel === 'function') {
-          // Using stable API
-          logger.info('Using Vertex AI stable API with getGenerativeModel');
-          const generativeModel = vertexAI.getGenerativeModel({ model });
-          imageResponse = await generativeModel.generateImage({ prompt });
-        } else {
-          // Using direct method on vertexAI
-          logger.info('Using direct method on vertexAI');
-          imageResponse = await vertexAI.generateImage({
-            prompt: prompt,
-            modelId: model
-          });
+        try {
+          // For version 0.2.1 of @google-cloud/vertexai, we need to access the Generation API differently
+          logger.info('Attempting to use Vertex AI with compatible method for version 0.2.1');
+          
+          // Initialize the Generation client
+          const aiplatformPath = '@google-cloud/vertexai';
+          const ai = require(aiplatformPath);
+          
+          // Get model name
+          const modelId = model;
+          logger.info(`Using model ID: ${modelId}`);
+          
+          // Create a Generation client directly with lower-level API
+          if (vertexAI.preview && typeof vertexAI.preview.generation === 'function') {
+            logger.info('Using Vertex AI preview.generation API');
+            const generation = vertexAI.preview.generation();
+            imageResponse = await generation.generateImage({
+              prompt: prompt,
+              modelId: modelId
+            });
+          } else if (vertexAI.generation && typeof vertexAI.generation === 'function') {
+            logger.info('Using Vertex AI generation API');
+            const generation = vertexAI.generation();
+            imageResponse = await generation.generateImage({
+              prompt: prompt,
+              modelId: modelId
+            });
+          } else {
+            // Try creating a completely new client
+            logger.info('Creating new Vertex AI Prediction client');
+            const { PredictionServiceClient } = require('@google-cloud/vertexai').v1;
+            const predictionClient = new PredictionServiceClient();
+            
+            const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'your-project-id';
+            const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+            
+            const name = `projects/${projectId}/locations/${location}/models/${modelId}`;
+            logger.info(`Using model path: ${name}`);
+            
+            const instances = [{
+              prompt: prompt
+            }];
+            
+            const [predictionResponse] = await predictionClient.predict({
+              name,
+              instances: instances
+            });
+            
+            logger.info('Prediction response received');
+            imageResponse = {
+              images: [predictionResponse.predictions[0].bytesValue]
+            };
+          }
+          
+          logger.info('Image generation response received from Vertex AI');
+          logger.debug(`Response structure: ${JSON.stringify(Object.keys(imageResponse || {}))}`);
+          
+          // Extract the image data from the response, handling different response formats
+          let imageData;
+          if (imageResponse && imageResponse.response && Array.isArray(imageResponse.response.images)) {
+            imageData = imageResponse.response.images[0].bytes;
+            logger.info('Found image data in response.images[0].bytes');
+          } else if (imageResponse && Array.isArray(imageResponse.images)) {
+            imageData = imageResponse.images[0];
+            logger.info('Found image data in images[0]');
+          } else if (imageResponse && imageResponse.images && imageResponse.images.length > 0) {
+            imageData = imageResponse.images[0];
+            logger.info('Found image data in images[0]');
+          } else if (imageResponse && imageResponse.image) {
+            imageData = imageResponse.image;
+            logger.info('Found image data in image property');
+          } else {
+            throw new Error('Unexpected response format from Vertex AI: ' + JSON.stringify(imageResponse));
+          }
+          
+          // Save image to file system
+          const imageBuffer = Buffer.from(imageData, 'base64');
+          const filename = `appraiser_${appraiser.id}_${appraiserDataHash}.jpg`;
+          const filePath = path.join(imageDir, filename);
+          
+          await fs.writeFile(filePath, imageBuffer);
+          
+          // Return image data
+          const imageUrl = `/images/${filename}`;
+          
+          logger.info(`Successfully generated image for appraiser ${appraiser.id}`);
+          
+          return {
+            imageUrl,
+            imageBuffer,
+            appraiserDataHash,
+            prompt // Include the prompt in the response for reference
+          };
+        } catch (error) {
+          logger.error(`Error in Vertex AI image generation: ${error.message}`);
+          logger.error(error.stack);
+          throw new Error(`Failed to generate image using Vertex AI: ${error.message}`);
         }
-        
-        logger.info('Image generation response received from Vertex AI');
-        logger.debug(`Response structure: ${JSON.stringify(Object.keys(imageResponse || {}))}`);
-        
-        // Extract the image data from the response, handling different response formats
-        let imageData;
-        if (imageResponse && imageResponse.response && Array.isArray(imageResponse.response.images)) {
-          imageData = imageResponse.response.images[0].bytes;
-          logger.info('Found image data in response.images[0].bytes');
-        } else if (imageResponse && Array.isArray(imageResponse.images)) {
-          imageData = imageResponse.images[0];
-          logger.info('Found image data in images[0]');
-        } else if (imageResponse && imageResponse.images && imageResponse.images.length > 0) {
-          imageData = imageResponse.images[0];
-          logger.info('Found image data in images[0]');
-        } else if (imageResponse && imageResponse.image) {
-          imageData = imageResponse.image;
-          logger.info('Found image data in image property');
-        } else {
-          throw new Error('Unexpected response format from Vertex AI: ' + JSON.stringify(imageResponse));
-        }
-        
-        // Save image to file system
-        const imageBuffer = Buffer.from(imageData, 'base64');
-        const filename = `appraiser_${appraiser.id}_${appraiserDataHash}.jpg`;
-        const filePath = path.join(imageDir, filename);
-        
-        await fs.writeFile(filePath, imageBuffer);
-        
-        // Return image data
-        const imageUrl = `/images/${filename}`;
-        
-        logger.info(`Successfully generated image for appraiser ${appraiser.id}`);
-        
-        return {
-          imageUrl,
-          imageBuffer,
-          appraiserDataHash,
-          prompt // Include the prompt in the response for reference
-        };
       } catch (error) {
         logger.error(`Error in Vertex AI image generation: ${error.message}`);
         logger.error(error.stack);
@@ -396,25 +429,57 @@ const imageGenerator = {
       // Different approach to access the generative model based on API version
       let imageResponse;
       try {
-        if (typeof vertexAI.preview === 'object' && typeof vertexAI.preview.generateImage === 'function') {
-          // Using preview API
-          logger.info('Using Vertex AI preview API for custom prompt');
-          imageResponse = await vertexAI.preview.generateImage({
+        // For version 0.2.1 of @google-cloud/vertexai, we need to access the Generation API differently
+        logger.info('Attempting to use Vertex AI with compatible method for version 0.2.1');
+        
+        // Initialize the Generation client
+        const aiplatformPath = '@google-cloud/vertexai';
+        const ai = require(aiplatformPath);
+        
+        // Get model name
+        const modelId = model;
+        logger.info(`Using model ID: ${modelId}`);
+        
+        // Create a Generation client directly with lower-level API
+        if (vertexAI.preview && typeof vertexAI.preview.generation === 'function') {
+          logger.info('Using Vertex AI preview.generation API');
+          const generation = vertexAI.preview.generation();
+          imageResponse = await generation.generateImage({
             prompt: customPrompt,
-            modelId: model
+            modelId: modelId
           });
-        } else if (typeof vertexAI.getGenerativeModel === 'function') {
-          // Using stable API
-          logger.info('Using Vertex AI stable API with getGenerativeModel for custom prompt');
-          const generativeModel = vertexAI.getGenerativeModel({ model });
-          imageResponse = await generativeModel.generateImage({ prompt: customPrompt });
+        } else if (vertexAI.generation && typeof vertexAI.generation === 'function') {
+          logger.info('Using Vertex AI generation API');
+          const generation = vertexAI.generation();
+          imageResponse = await generation.generateImage({
+            prompt: customPrompt,
+            modelId: modelId
+          });
         } else {
-          // Using direct method on vertexAI
-          logger.info('Using direct method on vertexAI for custom prompt');
-          imageResponse = await vertexAI.generateImage({
-            prompt: customPrompt,
-            modelId: model
+          // Try creating a completely new client
+          logger.info('Creating new Vertex AI Prediction client');
+          const { PredictionServiceClient } = require('@google-cloud/vertexai').v1;
+          const predictionClient = new PredictionServiceClient();
+          
+          const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'your-project-id';
+          const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+          
+          const name = `projects/${projectId}/locations/${location}/models/${modelId}`;
+          logger.info(`Using model path: ${name}`);
+          
+          const instances = [{
+            prompt: customPrompt
+          }];
+          
+          const [predictionResponse] = await predictionClient.predict({
+            name,
+            instances: instances
           });
+          
+          logger.info('Prediction response received');
+          imageResponse = {
+            images: [predictionResponse.predictions[0].bytesValue]
+          };
         }
         
         logger.info('Custom prompt image generation response received from Vertex AI');
