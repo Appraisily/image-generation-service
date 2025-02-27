@@ -136,21 +136,31 @@ const imageGenerator = {
         try {
           const model = await vertexAI.preview.getGenerativeModel({
             model: modelName,
-            generation: "generation",
           });
           
           logger.info('Successfully created Vertex AI generative model using preview.getGenerativeModel');
           
-          const result = await model.generateImages({
-            prompt: prompt,
+          // Use generateContent instead of generateImages
+          const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
           });
           
-          // Extract base64 image data from response
-          if (result && result.images && result.images.length > 0) {
-            imageBase64 = result.images[0];
+          // Extract image data from response
+          if (result && 
+              result.response && 
+              result.response.candidates && 
+              result.response.candidates[0] && 
+              result.response.candidates[0].content && 
+              result.response.candidates[0].content.parts && 
+              result.response.candidates[0].content.parts[0] && 
+              result.response.candidates[0].content.parts[0].inlineData && 
+              result.response.candidates[0].content.parts[0].inlineData.data) {
+            imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
             logger.info('Successfully generated image using Vertex AI preview.getGenerativeModel');
           } else {
-            throw new Error('No images returned from Vertex AI');
+            logger.warn('Unexpected response structure from Vertex AI');
+            logger.warn(JSON.stringify(result));
+            throw new Error('Unexpected response structure from Vertex AI');
           }
         } catch (previewError) {
           logger.warn(`Error using preview.getGenerativeModel: ${previewError.message}`);
@@ -164,16 +174,27 @@ const imageGenerator = {
             
             logger.info('Successfully created Vertex AI generative model using getGenerativeModel');
             
-            const result = await model.generateImages({
-              prompt: prompt,
+            // Use generateContent instead of generateImages
+            const result = await model.generateContent({
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
             });
             
-            // Extract base64 image data from response
-            if (result && result.images && result.images.length > 0) {
-              imageBase64 = result.images[0];
+            // Extract image data from response
+            if (result && 
+                result.response && 
+                result.response.candidates && 
+                result.response.candidates[0] && 
+                result.response.candidates[0].content && 
+                result.response.candidates[0].content.parts && 
+                result.response.candidates[0].content.parts[0] && 
+                result.response.candidates[0].content.parts[0].inlineData && 
+                result.response.candidates[0].content.parts[0].inlineData.data) {
+              imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
               logger.info('Successfully generated image using Vertex AI getGenerativeModel');
             } else {
-              throw new Error('No images returned from Vertex AI');
+              logger.warn('Unexpected response structure from Vertex AI');
+              logger.warn(JSON.stringify(result));
+              throw new Error('Unexpected response structure from Vertex AI');
             }
           } catch (nonPreviewError) {
             logger.warn(`Error using getGenerativeModel: ${nonPreviewError.message}`);
@@ -436,21 +457,31 @@ const imageGenerator = {
         try {
           const model = await vertexAI.preview.getGenerativeModel({
             model: modelName,
-            generation: "generation",
           });
           
           logger.info('Successfully created Vertex AI generative model using preview.getGenerativeModel');
           
-          const result = await model.generateImages({
-            prompt: customPrompt,
+          // Use generateContent instead of generateImages
+          const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: customPrompt }] }],
           });
           
-          // Extract base64 image data from response
-          if (result && result.images && result.images.length > 0) {
-            imageBase64 = result.images[0];
+          // Extract image data from response
+          if (result && 
+              result.response && 
+              result.response.candidates && 
+              result.response.candidates[0] && 
+              result.response.candidates[0].content && 
+              result.response.candidates[0].content.parts && 
+              result.response.candidates[0].content.parts[0] && 
+              result.response.candidates[0].content.parts[0].inlineData && 
+              result.response.candidates[0].content.parts[0].inlineData.data) {
+            imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
             logger.info('Successfully generated image using Vertex AI preview.getGenerativeModel');
           } else {
-            throw new Error('No images returned from Vertex AI');
+            logger.warn('Unexpected response structure from Vertex AI');
+            logger.warn(JSON.stringify(result));
+            throw new Error('Unexpected response structure from Vertex AI');
           }
         } catch (previewError) {
           logger.warn(`Error using preview.getGenerativeModel: ${previewError.message}`);
@@ -464,16 +495,27 @@ const imageGenerator = {
             
             logger.info('Successfully created Vertex AI generative model using getGenerativeModel');
             
-            const result = await model.generateImages({
-              prompt: customPrompt,
+            // Use generateContent instead of generateImages
+            const result = await model.generateContent({
+              contents: [{ role: 'user', parts: [{ text: customPrompt }] }],
             });
             
-            // Extract base64 image data from response
-            if (result && result.images && result.images.length > 0) {
-              imageBase64 = result.images[0];
+            // Extract image data from response
+            if (result && 
+                result.response && 
+                result.response.candidates && 
+                result.response.candidates[0] && 
+                result.response.candidates[0].content && 
+                result.response.candidates[0].content.parts && 
+                result.response.candidates[0].content.parts[0] && 
+                result.response.candidates[0].content.parts[0].inlineData && 
+                result.response.candidates[0].content.parts[0].inlineData.data) {
+              imageBase64 = result.response.candidates[0].content.parts[0].inlineData.data;
               logger.info('Successfully generated image using Vertex AI getGenerativeModel');
             } else {
-              throw new Error('No images returned from Vertex AI');
+              logger.warn('Unexpected response structure from Vertex AI');
+              logger.warn(JSON.stringify(result));
+              throw new Error('Unexpected response structure from Vertex AI');
             }
           } catch (nonPreviewError) {
             logger.warn(`Error using getGenerativeModel: ${nonPreviewError.message}`);
