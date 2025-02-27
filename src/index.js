@@ -28,11 +28,14 @@ const PORT = process.env.PORT || 3000;
   }
 })();
 
+// Get Google Cloud Project ID from available environment variables
+process.env.GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || 'civil-forge-403609';
+
 // Check critical environment variables
 if (!process.env.GOOGLE_CLOUD_PROJECT) {
-  logger.error('GOOGLE_CLOUD_PROJECT environment variable is not set');
+  logger.error('Neither GOOGLE_CLOUD_PROJECT nor GOOGLE_CLOUD_PROJECT_ID environment variables are set');
   logger.error('This is required for Vertex AI and Secret Manager to work properly');
-  logger.error('Please set this variable in your .env file or in your Cloud Run configuration');
+  logger.error('Please set one of these variables in your .env file or in your Cloud Run configuration');
   // We'll continue execution, but log a clear warning
 }
 

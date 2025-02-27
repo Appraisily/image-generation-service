@@ -70,11 +70,11 @@ gcloud run deploy image-generation-service \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=your-project-id,IMAGEKIT_PUBLIC_KEY=your-public-key,IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/your-endpoint,IMAGEKIT_FOLDER=appraiser-images" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT_ID=your-project-id,IMAGEKIT_PUBLIC_KEY=your-public-key,IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/your-endpoint,IMAGEKIT_FOLDER=appraiser-images" \
   --set-secrets="OPEN_AI_API_SEO=OPEN_AI_API_SEO:latest,IMAGEKIT_API_KEY=IMAGEKIT_API_KEY:latest"
 ```
 
-> **IMPORTANT**: The `GOOGLE_CLOUD_PROJECT` environment variable is **REQUIRED**. Without it, the service will not be able to:
+> **IMPORTANT**: Either `GOOGLE_CLOUD_PROJECT` or `GOOGLE_CLOUD_PROJECT_ID` environment variable is **REQUIRED**. Without it, the service will not be able to:
 > - Connect to Vertex AI for image generation
 > - Access secrets from Secret Manager
 > - Store images in Cloud Storage (if enabled)
@@ -112,7 +112,7 @@ The response should include information about the configuration state:
 
 ### Common Issues
 
-1. **GOOGLE_CLOUD_PROJECT Not Set**: This will cause Vertex AI and Secret Manager operations to fail. Ensure it's properly set in the deployment command.
+1. **GOOGLE_CLOUD_PROJECT/GOOGLE_CLOUD_PROJECT_ID Not Set**: This will cause Vertex AI and Secret Manager operations to fail. Ensure either of these variables is properly set in the deployment command.
 
 2. **Secret Access Denied**: Ensure your service account has the proper permissions to access the secrets.
 
@@ -153,7 +153,7 @@ gcloud run deploy image-generation-service \
   --source . \
   --platform managed \
   --region us-central1 \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=your-project-id"
+  --set-env-vars="GOOGLE_CLOUD_PROJECT_ID=your-project-id"
 ```
 
-This will keep your existing environment variables and secret configurations, but ensure the GOOGLE_CLOUD_PROJECT is set correctly. 
+This will keep your existing environment variables and secret configurations, but ensure either GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID is set correctly. 
