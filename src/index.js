@@ -16,6 +16,26 @@ const { logger } = require('./utils/logger');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Ensure required directories exist
+(async () => {
+  try {
+    await fs.ensureDir(path.join(__dirname, '../data/images'));
+    await fs.ensureDir(path.join(__dirname, '../data/prompts'));
+    await fs.ensureDir(path.join(__dirname, '../logs'));
+    logger.info('Required directories have been created');
+  } catch (error) {
+    logger.error(`Error creating directories: ${error.message}`);
+  }
+})();
+
+// Log environment configuration without exposing sensitive information
+logger.info(`Starting service with configuration:`);
+logger.info(`- NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+logger.info(`- PORT: ${PORT}`);
+logger.info(`- GOOGLE_CLOUD_PROJECT: ${process.env.GOOGLE_CLOUD_PROJECT || 'not set'}`);
+logger.info(`- IMAGEKIT configured: ${process.env.IMAGEKIT_PUBLIC_KEY ? 'Yes' : 'No'}`);
+logger.info(`- OpenAI API Key configured: ${process.env.OPEN_AI_API_SEO ? 'Yes' : 'No'}`);
+
 // Middleware
 app.use(cors());
 app.use(express.json());

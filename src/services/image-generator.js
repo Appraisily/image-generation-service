@@ -26,6 +26,9 @@ try {
 const GPT_API_KEY = process.env.OPEN_AI_API_SEO;
 const GPT_API_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
+// Attempt to log if we have API keys configured (without exposing the actual keys)
+logger.info(`OpenAI API Key configured: ${GPT_API_KEY ? 'Yes' : 'No'}`);
+
 const imageGenerator = {
   /**
    * Generate an image for an appraiser
@@ -44,25 +47,36 @@ const imageGenerator = {
       const imageDir = path.join(__dirname, '../../data/images');
       await fs.ensureDir(imageDir);
       
-      // Generate image using Vertex AI
-      const generativeModel = vertexAI.preview.getGenerativeModel({
+      // Generate image using Vertex AI - UPDATED API USAGE
+      const generativeModel = vertexAI.getGenerativeModel({
         model: process.env.IMAGEN_MODEL || 'imagegeneration@002',
       });
       
       logger.info(`Sending GPT-generated prompt to Vertex AI: "${prompt.substring(0, 100)}..."`);
       
-      const imageResponse = await generativeModel.generateImages({
+      // Updated Vertex AI API call format
+      const imageRequest = {
         prompt: prompt,
-        sampleCount: 1,
-        negativePrompt: "distorted features, ugly, deformed, disfigured, poor anatomy, bad proportions, watermark, text, signature, blurry",
-        dimensions: { width: 512, height: 512 },
-        generationConfig: {
-          samplingTemperature: 0.8,
-        }
-      });
+      };
+      
+      const imageResponse = await generativeModel.generateImage(imageRequest);
+      logger.info('Image generation response received from Vertex AI');
+      
+      // Extract the image data from the response
+      // Check the format of the response - it might be in imageResponse.response.images[0]
+      let imageData;
+      if (imageResponse && imageResponse.response && Array.isArray(imageResponse.response.images)) {
+        imageData = imageResponse.response.images[0].bytes;
+        logger.info('Successfully extracted image data from response');
+      } else if (imageResponse && Array.isArray(imageResponse.images)) {
+        imageData = imageResponse.images[0];
+        logger.info('Successfully extracted image data from legacy response format');
+      } else {
+        throw new Error('Unexpected response format from Vertex AI');
+      }
       
       // Save image to file system
-      const imageBuffer = Buffer.from(imageResponse.images[0], 'base64');
+      const imageBuffer = Buffer.from(imageData, 'base64');
       const filename = `appraiser_${appraiser.id}_${appraiserDataHash}.jpg`;
       const filePath = path.join(imageDir, filename);
       
@@ -94,6 +108,7 @@ const imageGenerator = {
     try {
       if (!GPT_API_KEY) {
         logger.warn('OpenAI API Key not provided. Falling back to basic prompt generation.');
+        logger.info('In production, ensure OPEN_AI_API_SEO is available from Secret Manager');
         return this.createBasicPrompt(appraiser);
       }
       
@@ -280,23 +295,34 @@ const imageGenerator = {
       const imageDir = path.join(__dirname, '../../data/images');
       await fs.ensureDir(imageDir);
       
-      // Generate image using Vertex AI
-      const generativeModel = vertexAI.preview.getGenerativeModel({
+      // Generate image using Vertex AI - UPDATED API USAGE
+      const generativeModel = vertexAI.getGenerativeModel({
         model: process.env.IMAGEN_MODEL || 'imagegeneration@002',
       });
       
-      const imageResponse = await generativeModel.generateImages({
+      // Updated Vertex AI API call format
+      const imageRequest = {
         prompt: customPrompt,
-        sampleCount: 1,
-        negativePrompt: "distorted features, ugly, deformed, disfigured, poor anatomy, bad proportions, watermark, text, signature, blurry",
-        dimensions: { width: 512, height: 512 },
-        generationConfig: {
-          samplingTemperature: 0.8,
-        }
-      });
+      };
+      
+      const imageResponse = await generativeModel.generateImage(imageRequest);
+      logger.info('Custom prompt image generation response received from Vertex AI');
+      
+      // Extract the image data from the response
+      // Check the format of the response - it might be in imageResponse.response.images[0]
+      let imageData;
+      if (imageResponse && imageResponse.response && Array.isArray(imageResponse.response.images)) {
+        imageData = imageResponse.response.images[0].bytes;
+        logger.info('Successfully extracted image data from response');
+      } else if (imageResponse && Array.isArray(imageResponse.images)) {
+        imageData = imageResponse.images[0];
+        logger.info('Successfully extracted image data from legacy response format');
+      } else {
+        throw new Error('Unexpected response format from Vertex AI');
+      }
       
       // Save image to file system
-      const imageBuffer = Buffer.from(imageResponse.images[0], 'base64');
+      const imageBuffer = Buffer.from(imageData, 'base64');
       const filename = `appraiser_${appraiser.id}_${appraiserDataHash}_custom.jpg`;
       const filePath = path.join(imageDir, filename);
       
