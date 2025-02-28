@@ -97,16 +97,19 @@ const generateImage = async (prompt) => {
     
     logger.info('Sending request to fal-ai Flux Ultra model');
     
-    // Use the fal.run method instead of client.run
-    const result = await fal.run('flux-ultra', {
+    // Use the fal.queue.submit method with the correct model endpoint and parameters
+    const { request_id } = await fal.queue.submit("fal-ai/flux-pro/v1.1-ultra", {
       input: {
         prompt: prompt,
-        image_size: 'landscape_16_9',
+        aspect_ratio: '16:9',  // Changed from image_size to aspect_ratio
         sync_mode: true,
         num_images: 1,
-        enable_safety_checks: true
+        enable_safety_checker: true  // Changed from enable_safety_checks to enable_safety_checker
       }
     });
+    
+    // Wait for the result
+    const result = await fal.queue.get(request_id);
     
     if (result && result.images && result.images.length > 0) {
       logger.info('Successfully received image from fal-ai');
