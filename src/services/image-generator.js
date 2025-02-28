@@ -10,7 +10,6 @@ const https = require('https');
 const { logger } = require('../utils/logger');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager').v1;
 const falAiClient = require('./fal-ai-client');
-const imageCache = require('./image-cache');
 
 // Initialize Secret Manager
 let secretManagerClient;
@@ -78,17 +77,8 @@ const imageGenerator = {
       const appraiserDataHash = this.generateAppraiserDataHash(appraiser);
       logger.info(`Generating new image for appraiser: ${appraiser.id}`);
       
-      // Check if image is already in cache
-      const cachedImage = await imageCache.getFromCache(appraiser.id);
-      if (cachedImage && cachedImage.metadata && cachedImage.metadata.appraiserDataHash === appraiserDataHash) {
-        logger.info(`Using cached image for appraiser: ${appraiser.id}`);
-        return {
-          imageUrl: cachedImage.imageUrl,
-          cached: true,
-          prompt: cachedImage.prompt || null,
-          source: cachedImage.imageUrl.includes('ik.imagekit.io') ? 'imagekit' : 'local'
-        };
-      }
+      // Skip cache check - we don't want to use the cache at all
+      logger.info(`Cache check bypassed for appraiser: ${appraiser.id}`);
       
       // Create a prompt for the image generation
       let prompt;
@@ -120,27 +110,15 @@ const imageGenerator = {
         // Download the image
         const imageBuffer = await this.downloadImage(generatedImage.imageUrl);
         
-        // Save to cache (both local and ImageKit if configured)
-        const metadata = {
-          generatedAt: new Date().toISOString(),
-          appraiserDataHash,
-          modelUsed: 'fal-ai-flux-ultra'
-        };
+        // Skip saving to cache - we don't want to use the cache at all
+        logger.info(`Skipping cache save for appraiser: ${appraiser.id}`);
         
-        const cacheResult = await imageCache.saveToCache(
-          appraiser.id,
-          generatedImage.imageUrl,
-          imageBuffer,
-          metadata,
-          prompt
-        );
-        
-        // Return the image data
+        // Return the image data directly from fal-ai
         return {
-          imageUrl: cacheResult.imagekitUrl || generatedImage.imageUrl,
+          imageUrl: generatedImage.imageUrl,
           cached: false,
           prompt,
-          source: cacheResult.imagekitUrl ? 'imagekit' : 'fal-ai'
+          source: 'fal-ai'
         };
       } catch (error) {
         logger.error(`Error in fal-ai image generation: ${error.message}`);
