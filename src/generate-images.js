@@ -8,7 +8,6 @@ const fs = require('fs-extra');
 const path = require('path');
 const md5 = require('md5');
 const { imageGenerator } = require('./services/image-generator');
-const { imageCache } = require('./services/image-cache');
 const { logger } = require('./utils/logger');
 
 // Directory paths
@@ -65,75 +64,59 @@ async function generateImagesForAppraisersWithoutImages() {
       try {
         logger.info(`Processing appraiser: ${appraiser.id} - ${appraiser.name || 'Unknown'}`);
         
-        // Generate data hash
-        const appraiserDataHash = md5(JSON.stringify({
+        // Generate appraiser data hash for tracking changes
+        const appraiserDataHash = md5(JSON.stringify(appraiser));
+        logger.debug(JSON.stringify({
           id: appraiser.id,
+          name: appraiser.name || 'Unknown',
           gender: appraiser.gender || 'unknown',
           specialization: appraiser.specialization || 'unknown',
           age: appraiser.age || 'unknown'
         }));
         
-        // Check cache first
-        const cachedImage = await imageCache.getFromCache(appraiser.id);
+        // Skip cache - directly generate an image
+        logger.info(`Generating new image for appraiser ${appraiser.id}`);
         
-        if (cachedImage && !imageCache.shouldRegenerateImage(appraiser.id, appraiser, appraiserDataHash)) {
-          logger.info(`Using cached image for appraiser ${appraiser.id}`);
+        try {
+          // Generate new image
+          const result = await imageGenerator.generateImage(appraiser);
+          
+          if (result.error) {
+            logger.error(`Error generating image for appraiser ${appraiser.id}: ${result.error}`);
+            results.failed++;
+            results.details.push({
+              id: appraiser.id,
+              name: appraiser.name || 'Unknown',
+              status: 'failed',
+              error: result.error
+            });
+            continue;
+          }
           
           // Update the appraiser data with the image URL
-          await updateAppraiserData(appraiser.id, cachedImage.imageUrl);
+          await updateAppraiserData(appraiser.id, result.imageUrl);
           
-          results.skipped++;
+          // Add to results
+          results.successful++;
           results.details.push({
             id: appraiser.id,
             name: appraiser.name || 'Unknown',
-            status: 'skipped',
-            reason: 'cached',
-            imageUrl: cachedImage.imageUrl,
-            source: cachedImage.imageUrl.includes('ik.imagekit.io') ? 'imagekit' : 'local',
-            promptCached: !!cachedImage.prompt
+            status: 'success',
+            imageUrl: result.imageUrl,
+            source: result.source || 'fal-ai'
           });
           
-          continue;
+          logger.info(`Image generated successfully for appraiser ${appraiser.id}`);
+        } catch (error) {
+          logger.error(`Error generating image for appraiser ${appraiser.id}: ${error.message}`);
+          results.failed++;
+          results.details.push({
+            id: appraiser.id,
+            name: appraiser.name || 'Unknown',
+            status: 'failed',
+            error: error.message
+          });
         }
-        
-        // Generate new image
-        logger.info(`Generating new image for appraiser ${appraiser.id}`);
-        const result = await imageGenerator.generateImage(appraiser);
-        
-        // Cache the image with prompt
-        const cacheResult = await imageCache.saveToCache(
-          appraiser.id, 
-          result.imageUrl, 
-          result.imageBuffer, 
-          {
-            generatedAt: new Date().toISOString(),
-            appraiserDataHash: result.appraiserDataHash
-          },
-          result.prompt
-        );
-        
-        // Use ImageKit URL if available, otherwise use local URL
-        const finalImageUrl = cacheResult.imagekitUrl || result.imageUrl;
-        
-        // Update the appraiser data with the image URL
-        await updateAppraiserData(appraiser.id, finalImageUrl);
-        
-        // Save the prompt to a separate file for reference
-        if (result.prompt) {
-          const promptFilePath = path.join(PROMPTS_DIR, `appraiser_${appraiser.id}_prompt.txt`);
-          await fs.writeFile(promptFilePath, result.prompt);
-          logger.info(`Saved prompt to ${promptFilePath}`);
-        }
-        
-        results.successful++;
-        results.details.push({
-          id: appraiser.id,
-          name: appraiser.name || 'Unknown',
-          status: 'success',
-          imageUrl: finalImageUrl,
-          source: cacheResult.imagekitUrl ? 'imagekit' : 'local',
-          promptGenerated: !!result.prompt
-        });
       } catch (error) {
         logger.error(`Error processing appraiser ${appraiser.id}: ${error.message}`);
         results.failed++;

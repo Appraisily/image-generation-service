@@ -8,8 +8,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs-extra');
 const path = require('path');
-const { imageGenerator } = require('./services/image-generator');
-const { imageCache } = require('./services/image-cache');
+const imageGenerator = require('./services/image-generator');
 const { logger } = require('./utils/logger');
 
 // Initialize Express app
@@ -87,65 +86,29 @@ app.post('/api/generate', async (req, res) => {
     
     logger.info(`Received request to generate image for appraiser: ${appraiser.id}`);
     
-    // Check if Google Cloud Project ID is set (we already normalize this in the beginning)
-    if (!process.env.GOOGLE_CLOUD_PROJECT) {
-      logger.error('Cannot generate image: Neither GOOGLE_CLOUD_PROJECT nor GOOGLE_CLOUD_PROJECT_ID environment variables are set');
-      return res.status(500).json({ 
-        error: 'Configuration error',
-        message: 'The service is not properly configured. Either GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID is required for Vertex AI.'
-      });
-    }
-    
-    // Check cache first
-    const cachedImage = await imageCache.getFromCache(appraiser.id);
-    if (cachedImage) {
-      logger.info(`Using cached image for appraiser: ${appraiser.id}`);
-      return res.status(200).json({ 
-        success: true, 
-        cached: true,
-        imageUrl: cachedImage.imageUrl,
-        metadata: cachedImage.metadata,
-        prompt: cachedImage.prompt
-      });
-    }
-    
-    // Generate new image
+    // Skip cache check - directly generate an image
     logger.info(`Generating new image for appraiser: ${appraiser.id}`);
     
-    // If customPrompt is provided, use it instead of generating one with GPT
-    const result = customPrompt 
-      ? await imageGenerator.generateImageWithCustomPrompt(appraiser, customPrompt)
-      : await imageGenerator.generateImage(appraiser);
-    
-    // Cache the image with prompt
-    const cacheResult = await imageCache.saveToCache(
-      appraiser.id, 
-      result.imageUrl, 
-      result.imageBuffer, 
-      {
-        generatedAt: new Date().toISOString(),
-        appraiserDataHash: result.appraiserDataHash
-      },
-      result.prompt
-    );
-    
-    // Use ImageKit URL if available, otherwise use local URL
-    const imageUrl = cacheResult.imagekitUrl || result.imageUrl;
-    
-    return res.status(200).json({
-      success: true,
-      cached: false,
-      imageUrl: imageUrl,
-      metadata: {
-        generatedAt: new Date().toISOString(),
-        appraiserDataHash: result.appraiserDataHash,
-        source: cacheResult.imagekitUrl ? 'imagekit' : 'local'
-      },
-      prompt: result.prompt
-    });
+    try {
+      // Generate a new image
+      const result = await imageGenerator.generateImage(appraiser, customPrompt);
+      
+      if (result.error) {
+        logger.error(`Error generating image: ${result.error}`);
+        return res.status(500).json({ error: result.error });
+      }
+      
+      return res.status(200).json({ 
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      logger.error(`Error generating image: ${error.message}`);
+      return res.status(500).json({ error: `Error generating image: ${error.message}` });
+    }
   } catch (error) {
-    logger.error(`Error generating image: ${error.message}`);
-    res.status(500).json({ error: 'Failed to generate image', message: error.message });
+    logger.error(`API error: ${error.message}`);
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -172,51 +135,33 @@ app.post('/api/generate-bulk', async (req, res) => {
       
       for (const appraiser of appraisers) {
         try {
-          // Check cache first
-          const cachedImage = await imageCache.getFromCache(appraiser.id);
+          // Skip cache check - directly generate an image
+          logger.info(`Generating new image for appraiser: ${appraiser.id}`);
           
-          if (cachedImage) {
-            logger.info(`Using cached image for appraiser: ${appraiser.id}`);
+          const result = await imageGenerator.generateImage(appraiser);
+          
+          if (result.error) {
+            logger.error(`Error generating image for appraiser ${appraiser.id}: ${result.error}`);
             results.push({
               id: appraiser.id,
-              success: true,
-              cached: true,
-              imageUrl: cachedImage.imageUrl,
-              source: cachedImage.imageUrl.includes('ik.imagekit.io') ? 'imagekit' : 'local',
-              promptCached: !!cachedImage.prompt
+              success: false,
+              error: result.error
             });
             continue;
           }
           
-          // Generate new image
-          logger.info(`Generating new image for appraiser: ${appraiser.id}`);
-          const result = await imageGenerator.generateImage(appraiser);
-          
-          // Cache the image with prompt
-          const cacheResult = await imageCache.saveToCache(
-            appraiser.id, 
-            result.imageUrl, 
-            result.imageBuffer, 
-            {
-              generatedAt: new Date().toISOString(),
-              appraiserDataHash: result.appraiserDataHash
-            },
-            result.prompt
-          );
-          
-          // Use ImageKit URL if available, otherwise use local URL
-          const imageUrl = cacheResult.imagekitUrl || result.imageUrl;
-          
+          // Add result to results array
           results.push({
             id: appraiser.id,
             success: true,
             cached: false,
-            imageUrl: imageUrl,
-            source: cacheResult.imagekitUrl ? 'imagekit' : 'local',
-            promptGenerated: !!result.prompt
+            imageUrl: result.imageUrl,
+            source: result.source
           });
+          
+          logger.info(`Successfully generated image for appraiser: ${appraiser.id}`);
         } catch (error) {
-          logger.error(`Error generating image for appraiser ${appraiser.id}: ${error.message}`);
+          logger.error(`Error processing appraiser ${appraiser.id}: ${error.message}`);
           results.push({
             id: appraiser.id,
             success: false,
@@ -225,25 +170,13 @@ app.post('/api/generate-bulk', async (req, res) => {
         }
       }
       
-      // Save results to a log file
-      const resultsLog = {
-        timestamp: new Date().toISOString(),
-        totalProcessed: appraisers.length,
-        successCount: results.filter(r => r.success).length,
-        failureCount: results.filter(r => !r.success).length,
-        results: results
-      };
-      
-      await fs.writeJSON(
-        path.join(__dirname, '../logs', `bulk-generation-${new Date().toISOString().replace(/:/g, '-')}.json`),
-        resultsLog
-      );
-      
-      logger.info(`Bulk generation completed. Success: ${resultsLog.successCount}, Failures: ${resultsLog.failureCount}`);
-    })();
+      logger.info(`Bulk generation completed. Results: ${JSON.stringify(results)}`);
+    })().catch(error => {
+      logger.error(`Unhandled error in bulk processing: ${error.message}`);
+    });
   } catch (error) {
-    logger.error(`Error starting bulk generation: ${error.message}`);
-    res.status(500).json({ error: 'Failed to start bulk generation', message: error.message });
+    logger.error(`API error: ${error.message}`);
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -256,17 +189,8 @@ app.get('/api/prompt/:appraiserId', async (req, res) => {
       return res.status(400).json({ error: 'Appraiser ID is required' });
     }
     
-    // Check cache for prompt
-    const cachedImage = await imageCache.getFromCache(appraiserId);
-    
-    if (cachedImage && cachedImage.prompt) {
-      return res.status(200).json({
-        success: true,
-        appraiserId,
-        prompt: cachedImage.prompt,
-        metadata: cachedImage.metadata
-      });
-    }
+    // Skip cache check - we're not using cache anymore
+    logger.info(`Checking local prompt file for appraiser: ${appraiserId}`);
     
     // Check prompt files
     const promptsDir = path.join(__dirname, '../data/prompts');
@@ -288,7 +212,7 @@ app.get('/api/prompt/:appraiserId', async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error retrieving prompt: ${error.message}`);
-    res.status(500).json({ error: 'Failed to retrieve prompt', message: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
