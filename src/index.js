@@ -112,6 +112,45 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
+// Generate location image endpoint
+app.post('/api/generate-location', async (req, res) => {
+  try {
+    const { location, customPrompt } = req.body;
+    
+    if (!location || !location.id) {
+      return res.status(400).json({ error: 'Invalid location data. ID is required.' });
+    }
+    
+    logger.info(`Received request to generate image for location: ${location.id}`);
+    
+    // Skip cache check - directly generate an image
+    logger.info(`Generating new image for location: ${location.id}`);
+    
+    try {
+      // Generate a new image
+      // Note: This assumes imageGenerator has or will have a generateLocationImage method
+      // You may need to implement this method in the image-generator.js file
+      const result = await imageGenerator.generateLocationImage(location, customPrompt);
+      
+      if (result.error) {
+        logger.error(`Error generating location image: ${result.error}`);
+        return res.status(500).json({ error: result.error });
+      }
+      
+      return res.status(200).json({ 
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      logger.error(`Error generating location image: ${error.message}`);
+      return res.status(500).json({ error: `Error generating location image: ${error.message}` });
+    }
+  } catch (error) {
+    logger.error(`API error: ${error.message}`);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // Bulk generate images endpoint
 app.post('/api/generate-bulk', async (req, res) => {
   try {

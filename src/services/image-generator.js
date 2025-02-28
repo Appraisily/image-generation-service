@@ -305,6 +305,140 @@ const imageGenerator = {
         reject(error);
       });
     });
+  },
+
+  /**
+   * Generate a location image based on location data
+   * @param {Object} location - Location data with id, name, type, etc.
+   * @param {string} customPrompt - Optional custom prompt to override the generated one
+   * @returns {Promise<Object>} - Result object with imageUrl and other data
+   */
+  async generateLocationImage(location, customPrompt = null) {
+    try {
+      logger.info(`Generating image for location: ${location.id}`);
+      
+      // Extract location data
+      const locationName = location.name || '';
+      const locationType = location.type || 'Office';
+      const locationCity = location.city || '';
+      const locationState = location.state || '';
+      const locationDescription = location.description || '';
+      const locationFeatures = Array.isArray(location.features) ? location.features : [];
+      
+      // Generate a unique identifier for this location
+      const locationHash = md5(`${location.id}_${locationName}_${locationType}`);
+      const outputDir = path.join(__dirname, '../../data/images');
+      const outputFilename = `location_${locationHash}.jpg`;
+      const outputPath = path.join(outputDir, outputFilename);
+      
+      // Save the prompt to file for reference
+      const promptsDir = path.join(__dirname, '../../data/prompts');
+      const promptFilename = `location_${location.id}_prompt.txt`;
+      const promptPath = path.join(promptsDir, promptFilename);
+      
+      // Generate a prompt for the image
+      let prompt;
+      if (customPrompt) {
+        prompt = customPrompt;
+      } else {
+        // Let's build a prompt for this location type
+        let basePrompt = '';
+        let featuresText = '';
+        
+        if (locationFeatures.length > 0) {
+          featuresText = `It features ${locationFeatures.join(', ')}.`;
+        }
+        
+        // Different prompts based on location type
+        switch (locationType.toLowerCase()) {
+          case 'gallery':
+            basePrompt = `A professional photograph of ${locationName}, an art gallery ${locationCity ? `in ${locationCity}, ${locationState}` : locationState ? `in ${locationState}` : ''}. ${locationDescription} ${featuresText} The image should show a elegant art gallery with high ceilings, well-lit display areas, and a modern entrance.`;
+            break;
+          case 'museum':
+            basePrompt = `A professional photograph of ${locationName}, a museum ${locationCity ? `in ${locationCity}, ${locationState}` : locationState ? `in ${locationState}` : ''}. ${locationDescription} ${featuresText} The image should show a prestigious museum with grand architecture, columns, and a prominent entrance with visitors approaching.`;
+            break;
+          case 'auction house':
+            basePrompt = `A professional photograph of ${locationName}, an auction house ${locationCity ? `in ${locationCity}, ${locationState}` : locationState ? `in ${locationState}` : ''}. ${locationDescription} ${featuresText} The image should show an elegant auction house with a classic façade, refined entrance, and signs indicating it's an auction venue.`;
+            break;
+          case 'office':
+          default:
+            basePrompt = `A professional photograph of ${locationName}, a professional office building ${locationCity ? `in ${locationCity}, ${locationState}` : locationState ? `in ${locationState}` : ''}. ${locationDescription} ${featuresText} The image should show a modern office building with a clean entrance, professional signage, and business-appropriate architecture.`;
+        }
+        
+        prompt = `${basePrompt} The photograph should be high quality, professionally lit, with no people visible. It should be a daytime shot with good natural lighting, blue sky, and should focus on the building's exterior and entrance.`;
+      }
+      
+      // Save prompt to file
+      await fs.writeFile(promptPath, prompt, 'utf8');
+      logger.info(`Saved prompt to ${promptPath}`);
+      
+      // Generate image using the Black Forest AI service
+      logger.info(`Calling Black Forest AI for location image generation...`);
+      const bfaiResponse = await bfaiClient.generateImage(prompt);
+      
+      if (!bfaiResponse.success || !bfaiResponse.imageUrl) {
+        logger.error(`Failed to generate image with Black Forest AI: ${bfaiResponse.error || 'Unknown error'}`);
+        return {
+          error: bfaiResponse.error || 'Failed to generate image',
+          source: 'bfai'
+        };
+      }
+      
+      // Download the image and save it locally
+      logger.info(`Downloading image from Black Forest AI...`);
+      const imageBuffer = await this.downloadImage(bfaiResponse.imageUrl);
+      await fs.writeFile(outputPath, imageBuffer);
+      logger.info(`Saved image to ${outputPath}`);
+      
+      // Upload to ImageKit if configured
+      let imagekitUrl = null;
+      
+      try {
+        logger.info(`Uploading image to ImageKit...`);
+        const imagekitResponse = await imagekitClient.uploadImage(
+          imageBuffer,
+          `location_${location.id}`,
+          {
+            folder: '/locations/',
+            tags: ['location', locationType, locationCity, locationState].filter(Boolean),
+            useUniqueFileName: true,
+            isPrivateFile: false,
+            metadata: {
+              locationId: location.id,
+              locationName: locationName,
+              locationType: locationType,
+              locationCity: locationCity,
+              locationState: locationState
+            }
+          }
+        );
+        
+        if (imagekitResponse && imagekitResponse.url) {
+          imagekitUrl = imagekitResponse.url;
+          logger.info(`Successfully uploaded to ImageKit: ${imagekitUrl}`);
+        } else {
+          logger.warn('ImageKit upload completed but no URL returned');
+        }
+      } catch (error) {
+        logger.error(`ImageKit upload failed: ${error.message}`);
+        // Continue with the original URL as fallback
+      }
+      
+      // Return result with ImageKit URL if available, otherwise the original URL
+      return {
+        locationId: location.id,
+        imageUrl: imagekitUrl || bfaiResponse.imageUrl,
+        originalUrl: bfaiResponse.imageUrl,
+        source: imagekitUrl ? 'imagekit' : 'bfai',
+        prompt: prompt
+      };
+    } catch (error) {
+      logger.error(`Error generating location image: ${error.message}`);
+      return {
+        error: `Failed to generate location image: ${error.message}`,
+        source: 'internal_error'
+      };
+    }
   }
 };
 
