@@ -1,14 +1,15 @@
 # Appraisily Image Generation Service
 
-This service generates professional portrait images for art appraisers using the Black Forest AI API (Flux Pro model).
+This service generates professional portrait images for art appraisers using the Black Forest AI API (Flux Pro model) and stores them in ImageKit CDN.
 
 ## Overview
 
 The image generation service provides functionality to:
 
-1. Generate high-quality, photorealistic portrait images for art appraisers
+1. Generate high-quality, photorealistic portrait images for art appraisers using Black Forest AI
 2. Create detailed prompts using OpenAI's GPT-4o for better image results
-3. Handle image generation in a Cloud Run environment using Google Secret Manager
+3. Upload generated images to ImageKit CDN for persistent storage and fast delivery
+4. Handle image generation in a Cloud Run environment using Google Secret Manager
 
 ## Key Features
 
@@ -16,6 +17,7 @@ The image generation service provides functionality to:
 - Advanced prompt generation with GPT-4o
 - Configurable image parameters (width, height, etc.)
 - Polling mechanism for retrieving generation results
+- Automatic uploading of generated images to ImageKit CDN
 - Error handling and logging
 
 ## Setup
@@ -25,6 +27,7 @@ The image generation service provides functionality to:
 - Node.js 16+
 - Google Cloud project with Secret Manager access
 - Black Forest AI API key
+- ImageKit account with API credentials
 - OpenAI API key (optional, for better prompt generation)
 
 ### Environment Variables
@@ -32,6 +35,9 @@ The image generation service provides functionality to:
 The service can be configured using the following environment variables:
 
 - `BFL_API_KEY`: Black Forest AI API key for image generation
+- `IMAGEKIT_PUBLIC_KEY`: ImageKit public key
+- `IMAGEKIT_PRIVATE_KEY`: ImageKit private key
+- `IMAGEKIT_URL_ENDPOINT`: ImageKit URL endpoint (e.g. https://ik.imagekit.io/youraccount)
 - `OPEN_AI_API_SEO`: OpenAI API key for advanced prompt generation
 
 ### Secret Manager Setup
@@ -40,6 +46,8 @@ In production environments, the service uses Google Secret Manager to retrieve A
 
 1. Create secrets in your Google Cloud project:
    - Secret name: `BFL_API_KEY` - Value: Your Black Forest AI API key
+   - Secret name: `IMAGEKIT_PUBLIC_KEY` - Value: Your ImageKit public key
+   - Secret name: `IMAGEKIT_PRIVATE_KEY` - Value: Your ImageKit private key
    - Secret name: `OPEN_AI_API_SEO` - Value: Your OpenAI API key
 
 2. Ensure your Cloud Run service has access to Secret Manager with the appropriate permissions.
@@ -55,10 +63,14 @@ In production environments, the service uses Google Secret Manager to retrieve A
 
 ### Testing
 
-You can test the Black Forest AI integration using:
+You can test the various components with these scripts:
 
 ```bash
+# Test the Black Forest AI client
 node test-bfai-client.js
+
+# Test the ImageKit integration
+node test-imagekit.js
 ```
 
 ### Generating Images
@@ -71,14 +83,35 @@ npm run generate-images -- --id <appraiser-id>
 
 ## API Integration
 
+### Black Forest AI
+
 The service integrates with the Black Forest AI API using:
 
 1. POST request to initiate image generation
 2. Polling GET requests to retrieve the generation result
 
+### ImageKit
+
+Generated images are uploaded to ImageKit CDN to provide:
+
+1. Persistent storage of generated images
+2. Fast global image delivery through CDN
+3. Image transformation capabilities
+4. Secure URL access
+
+### API Endpoints
+
+The service exposes the following endpoints:
+
+- `POST /api/generate`: Generate an image for a single appraiser
+- `POST /api/generate-bulk`: Generate images for multiple appraisers
+- `GET /api/prompt/:appraiserId`: Get the prompt used for an appraiser's image
+- `GET /health`: Health check endpoint
+
 ## Dependencies
 
 - axios: HTTP client for making API requests
+- imagekit: ImageKit SDK for image uploads
 - @google-cloud/secret-manager: Client for accessing Google Secret Manager
 - md5: For generating data hashes
 - fs-extra: Enhanced file system operations
@@ -208,38 +241,4 @@ The service implements a multi-level caching strategy:
 1. **ImageKit CDN**: Primary storage for production-ready images with fast global delivery 
 2. **Local Filesystem Cache**: Images are stored locally in the `data/images` directory
 3. **Google Cloud Storage Cache**: Images are also stored in Google Cloud Storage
-4. **Manifest File**: A `cache-manifest.json` file tracks all cached images with metadata
-5. **Content-based Hashing**: Images are only regenerated when appraiser data changes
-6. **Time-based Expiry**: Cached images expire after 6 months
-
-## ImageKit Integration
-
-This service uses ImageKit.io as the primary image CDN for serving generated images to production environments. Benefits include:
-
-1. **Global CDN**: Fast image delivery worldwide with low latency
-2. **Image Optimization**: Automatic image optimization for different devices
-3. **Transformation API**: On-the-fly image resizing and transformations
-4. **Secure Delivery**: URL-based security parameters
-5. **Reliable Persistence**: Secure and stable image hosting
-
-### ImageKit Configuration
-
-To use ImageKit with this service, configure the following environment variables:
-
-```dotenv
-IMAGEKIT_PUBLIC_KEY=your-imagekit-public-key
-IMAGEKIT_PRIVATE_KEY=your-imagekit-private-key  # or IMAGEKIT_API_KEY from Secret Manager
-IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/appraisily
-IMAGEKIT_FOLDER=appraiser-images
-```
-
-Images are uploaded to ImageKit during the image generation process and the resulting URLs are used throughout the system.
-
-## Integration with Main Repo
-
-This service is integrated with the main Appraisily monorepo as a Git submodule, which allows it to:
-
-1. Access appraiser data from the directory frontend (when running locally or during development)
-2. Generate images during testing and development
-3. Store images in the correct locations for development preview
-4. Share cache between development sessions 
+4. **Manifest File**: A `cache-manifest.json`

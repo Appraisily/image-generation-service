@@ -10,6 +10,7 @@ const https = require('https');
 const { logger } = require('../utils/logger');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager').v1;
 const bfaiClient = require('./bfai-client');
+const imagekitClient = require('./imagekit-client');
 
 // Initialize Secret Manager
 let secretManagerClient;
@@ -107,21 +108,56 @@ const imageGenerator = {
         
         logger.info(`Successfully generated image using Black Forest AI: ${generatedImage.imageUrl}`);
         
-        // Download the image
+        // Download the image from Black Forest AI
         const imageBuffer = await this.downloadImage(generatedImage.imageUrl);
+        logger.info(`Successfully downloaded image from Black Forest AI, size: ${imageBuffer.length} bytes`);
         
-        // Skip saving to cache - we don't want to use the cache at all
-        logger.info(`Skipping cache save for appraiser: ${appraiser.id}`);
+        // Generate a file name for the image
+        const fileName = `appraiser_${appraiser.id}_${Date.now()}.jpg`;
         
-        // Return the image data directly from Black Forest AI
+        // Upload the image to ImageKit
+        let imagekitResponse;
+        try {
+          // Try direct upload with buffer first
+          logger.info('Attempting to upload image buffer to ImageKit');
+          imagekitResponse = await imagekitClient.uploadImage(imageBuffer, fileName);
+        } catch (uploadError) {
+          logger.warn(`Error uploading image buffer to ImageKit: ${uploadError.message}`);
+          logger.info('Falling back to URL-based upload to ImageKit');
+          
+          // Fall back to URL-based upload if buffer upload fails
+          imagekitResponse = await imagekitClient.uploadImageFromUrl(generatedImage.imageUrl, fileName);
+        }
+        
+        if (!imagekitResponse || !imagekitResponse.url) {
+          throw new Error('Failed to upload image to ImageKit');
+        }
+        
+        logger.info(`Successfully uploaded image to ImageKit: ${imagekitResponse.url}`);
+        
+        // Return the image data with the ImageKit URL
         return {
-          imageUrl: generatedImage.imageUrl,
+          imageUrl: imagekitResponse.url,
+          originalUrl: generatedImage.imageUrl, // Keep the original URL for reference
           cached: false,
           prompt,
           source: 'black-forest-ai'
         };
       } catch (error) {
-        logger.error(`Error in Black Forest AI image generation: ${error.message}`);
+        logger.error(`Error in image generation process: ${error.message}`);
+        
+        // If we have a generated image URL but failed to upload to ImageKit,
+        // return the original URL from Black Forest AI
+        if (generatedImage && generatedImage.imageUrl) {
+          logger.warn('Using original Black Forest AI URL due to ImageKit upload failure');
+          return {
+            imageUrl: generatedImage.imageUrl,
+            cached: false,
+            prompt,
+            source: 'black-forest-ai',
+            note: 'Using original AI provider URL (ImageKit upload failed)'
+          };
+        }
         
         // Return a fallback or error response
         return {
