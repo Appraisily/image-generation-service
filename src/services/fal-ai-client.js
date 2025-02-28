@@ -3,7 +3,8 @@
  * Provides functionality to interact with the fal-ai API for image generation
  */
 
-const fal = require('@fal-ai/client');
+// Import the fal client properly from the @fal-ai/client package
+const { fal } = require('@fal-ai/client');
 const { logger } = require('../utils/logger');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager').v1;
 
@@ -60,12 +61,8 @@ async function getSecret(secretName) {
   }
 })();
 
-// Initialize fal-ai client
-let falClient = null;
-
-const initFalClient = async () => {
-  if (falClient) return falClient;
-  
+// Configure the fal.ai client
+const configureClient = async () => {
   try {
     if (!falApiKey) {
       falApiKey = await getSecret('FAL_API_KEY');
@@ -75,13 +72,15 @@ const initFalClient = async () => {
       throw new Error('fal-ai API Key not available');
     }
     
-    // Initialize the client correctly without using FalClient constructor
-    falClient = fal.Client.withKey(falApiKey);
+    // Configure the fal client with the API key
+    fal.config({
+      credentials: falApiKey
+    });
     
-    logger.info('fal-ai client initialized successfully');
-    return falClient;
+    logger.info('fal-ai client configured successfully');
+    return true;
   } catch (error) {
-    logger.error(`Failed to initialize fal-ai client: ${error.message}`);
+    logger.error(`Failed to configure fal-ai client: ${error.message}`);
     throw error;
   }
 };
@@ -93,12 +92,13 @@ const initFalClient = async () => {
  */
 const generateImage = async (prompt) => {
   try {
-    const client = await initFalClient();
+    // Make sure the client is configured
+    await configureClient();
     
     logger.info('Sending request to fal-ai Flux Ultra model');
     
-    const result = await client.run({
-      connectionId: 'flux-ultra',
+    // Use the fal.run method instead of client.run
+    const result = await fal.run('flux-ultra', {
       input: {
         prompt: prompt,
         image_size: 'landscape_16_9',
@@ -126,5 +126,5 @@ const generateImage = async (prompt) => {
 
 module.exports = {
   generateImage,
-  initFalClient
+  configureClient
 }; 
