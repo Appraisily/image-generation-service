@@ -1,6 +1,87 @@
 # Appraisily Image Generation Service
 
-This service automatically generates professional profile images for art appraisers in the Appraisily directory using Google's Vertex AI Imagen model.
+This service generates professional portrait images for art appraisers using the Black Forest AI API (Flux Pro model).
+
+## Overview
+
+The image generation service provides functionality to:
+
+1. Generate high-quality, photorealistic portrait images for art appraisers
+2. Create detailed prompts using OpenAI's GPT-4o for better image results
+3. Handle image generation in a Cloud Run environment using Google Secret Manager
+
+## Key Features
+
+- Direct integration with Black Forest AI's Flux Pro model
+- Advanced prompt generation with GPT-4o
+- Configurable image parameters (width, height, etc.)
+- Polling mechanism for retrieving generation results
+- Error handling and logging
+
+## Setup
+
+### Prerequisites
+
+- Node.js 16+
+- Google Cloud project with Secret Manager access
+- Black Forest AI API key
+- OpenAI API key (optional, for better prompt generation)
+
+### Environment Variables
+
+The service can be configured using the following environment variables:
+
+- `BFL_API_KEY`: Black Forest AI API key for image generation
+- `OPEN_AI_API_SEO`: OpenAI API key for advanced prompt generation
+
+### Secret Manager Setup
+
+In production environments, the service uses Google Secret Manager to retrieve API keys:
+
+1. Create secrets in your Google Cloud project:
+   - Secret name: `BFL_API_KEY` - Value: Your Black Forest AI API key
+   - Secret name: `OPEN_AI_API_SEO` - Value: Your OpenAI API key
+
+2. Ensure your Cloud Run service has access to Secret Manager with the appropriate permissions.
+
+## Usage
+
+### Running Locally
+
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Create a `.env` file with your API keys
+4. Run the service: `npm start`
+
+### Testing
+
+You can test the Black Forest AI integration using:
+
+```bash
+node test-bfai-client.js
+```
+
+### Generating Images
+
+The service provides a command-line interface for generating images:
+
+```bash
+npm run generate-images -- --id <appraiser-id>
+```
+
+## API Integration
+
+The service integrates with the Black Forest AI API using:
+
+1. POST request to initiate image generation
+2. Polling GET requests to retrieve the generation result
+
+## Dependencies
+
+- axios: HTTP client for making API requests
+- @google-cloud/secret-manager: Client for accessing Google Secret Manager
+- md5: For generating data hashes
+- fs-extra: Enhanced file system operations
 
 ## Features
 

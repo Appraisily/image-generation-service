@@ -1,6 +1,6 @@
 /**
  * Image Generator Service
- * Provides functionality to generate images using fal-ai's Flux Ultra model
+ * Provides functionality to generate images using Black Forest AI's Flux Pro model
  */
 
 const md5 = require('md5');
@@ -9,7 +9,7 @@ const path = require('path');
 const https = require('https');
 const { logger } = require('../utils/logger');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager').v1;
-const falAiClient = require('./fal-ai-client');
+const bfaiClient = require('./bfai-client');
 
 // Initialize Secret Manager
 let secretManagerClient;
@@ -93,19 +93,19 @@ const imageGenerator = {
       
       // Log the prompt (without PII)
       const truncatedPrompt = prompt.length > 100 ? prompt.substring(0, 100) + '...' : prompt;
-      logger.info(`Sending prompt to fal-ai: "${truncatedPrompt}"`);
+      logger.info(`Sending prompt to Black Forest AI: "${truncatedPrompt}"`);
       
       let generatedImage;
       
       try {
-        // Use fal-ai client to generate the image
-        generatedImage = await falAiClient.generateImage(prompt);
+        // Use Black Forest AI client to generate the image
+        generatedImage = await bfaiClient.generateImage(prompt);
         
         if (!generatedImage || !generatedImage.imageUrl) {
-          throw new Error('Failed to generate image with fal-ai');
+          throw new Error('Failed to generate image with Black Forest AI');
         }
         
-        logger.info(`Successfully generated image using fal-ai: ${generatedImage.imageUrl}`);
+        logger.info(`Successfully generated image using Black Forest AI: ${generatedImage.imageUrl}`);
         
         // Download the image
         const imageBuffer = await this.downloadImage(generatedImage.imageUrl);
@@ -113,15 +113,15 @@ const imageGenerator = {
         // Skip saving to cache - we don't want to use the cache at all
         logger.info(`Skipping cache save for appraiser: ${appraiser.id}`);
         
-        // Return the image data directly from fal-ai
+        // Return the image data directly from Black Forest AI
         return {
           imageUrl: generatedImage.imageUrl,
           cached: false,
           prompt,
-          source: 'fal-ai'
+          source: 'black-forest-ai'
         };
       } catch (error) {
-        logger.error(`Error in fal-ai image generation: ${error.message}`);
+        logger.error(`Error in Black Forest AI image generation: ${error.message}`);
         
         // Return a fallback or error response
         return {

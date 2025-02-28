@@ -14,7 +14,6 @@
   "author": "Appraisily",
   "license": "ISC",
   "dependencies": {
-    "@fal-ai/client": "^1.2.3",
     "@google-cloud/secret-manager": "^5.2.0",
     "axios": "^1.6.2",
     "commander": "^11.1.0",
