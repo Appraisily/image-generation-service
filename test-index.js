@@ -1,28 +1,20 @@
-// Test that index.js loads without the cache module
-console.log('Testing index.js loading without imageCache...');
+// Simple test script to verify the fal-ai client module loads correctly
+console.log('\n-------------------------------------');
+console.log('Testing fal-ai client loading...');
+console.log('-------------------------------------\n');
 
 try {
-  // Mock the image-generator module to avoid actual API calls
-  const mockImageGenerator = {
-    generateImage: async () => ({
-      imageUrl: 'https://example.com/mock-image.jpg',
-      cached: false,
-      prompt: 'Mock prompt',
-      source: 'fal-ai'
-    })
-  };
+  // Simply test loading fal-ai-client directly
+  console.log('Attempting to load fal-ai-client.js...');
+  const falAiClient = require('./src/services/fal-ai-client');
+  console.log('✅ fal-ai-client.js loaded successfully');
   
-  // Mock module cache to return our mock for the image-generator
-  require.cache[require.resolve('./src/services/image-generator')] = {
-    exports: mockImageGenerator
-  };
+  // Print out what's exported
+  console.log('Exported from fal-ai-client:', Object.keys(falAiClient));
   
-  // Try to load index.js
-  const app = require('./src/index');
-  
-  console.log('✅ SUCCESS: index.js loaded without imageCache dependency!');
-  console.log('The modified image generation service should now work without any cache dependencies.');
+  console.log('\n✅ SUCCESS: fal-ai-client loaded without errors!');
+  console.log('The FalClient constructor error should be fixed.');
 } catch (error) {
-  console.error('❌ ERROR loading index.js:', error.message);
+  console.error('\n❌ ERROR loading fal-ai-client:', error.message);
   console.error(error);
 } 

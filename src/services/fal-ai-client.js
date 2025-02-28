@@ -3,7 +3,7 @@
  * Provides functionality to interact with the fal-ai API for image generation
  */
 
-const { FalClient } = require('@fal-ai/client');
+const fal = require('@fal-ai/client');
 const { logger } = require('../utils/logger');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager').v1;
 
@@ -75,11 +75,8 @@ const initFalClient = async () => {
       throw new Error('fal-ai API Key not available');
     }
     
-    falClient = new FalClient({
-      credentials: {
-        key: falApiKey
-      }
-    });
+    // Initialize the client correctly without using FalClient constructor
+    falClient = fal.Client.withKey(falApiKey);
     
     logger.info('fal-ai client initialized successfully');
     return falClient;
