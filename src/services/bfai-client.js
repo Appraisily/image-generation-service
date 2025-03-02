@@ -87,21 +87,55 @@ const generateImage = async (prompt) => {
     logger.info('Sending request to Black Forest AI Flux Pro model');
     
     // First, submit the generation request
-    const submitResponse = await axios.post(
-      'https://api.us1.bfl.ai/v1/flux-pro-1.1',
-      {
-        prompt: prompt,
-        width: 1024,
-        height: 576, // 16:9 aspect ratio
-      },
-      {
-        headers: {
-          'accept': 'application/json',
-          'x-key': apiKey,
-          'Content-Type': 'application/json'
+    let submitResponse;
+    try {
+      submitResponse = await axios.post(
+        'https://api.us1.bfl.ai/v1/flux-pro-1.1',
+        {
+          prompt: prompt,
+          width: 1024,
+          height: 576, // 16:9 aspect ratio
+        },
+        {
+          headers: {
+            'accept': 'application/json',
+            'x-key': apiKey,
+            'Content-Type': 'application/json'
+          }
         }
+      );
+    } catch (apiError) {
+      // Check for payment required errors in initial request
+      if (apiError.response) {
+        const statusCode = apiError.response.status;
+        
+        if (statusCode === 402) {
+          logger.error('Black Forest AI returned 402 Payment Required status');
+          throw new Error('Payment required for image generation (402)');
+        }
+        
+        // Check for error in response body that might indicate payment issues
+        if (apiError.response.data && typeof apiError.response.data === 'object') {
+          const errorData = apiError.response.data;
+          
+          if (errorData.error) {
+            if (errorData.error.includes('402') || 
+                errorData.error.toLowerCase().includes('payment') ||
+                errorData.error.toLowerCase().includes('credit') ||
+                errorData.error.toLowerCase().includes('billing')) {
+              logger.error(`Black Forest AI payment issue detected: ${errorData.error}`);
+              throw new Error(`Payment required for image generation: ${errorData.error}`);
+            }
+          }
+        }
+        
+        // For other errors, just pass along the status code
+        throw new Error(`Black Forest AI API error (${statusCode}): ${apiError.message}`);
       }
-    );
+      
+      // For network or other errors
+      throw apiError;
+    }
     
     if (!submitResponse.data || !submitResponse.data.id) {
       throw new Error('Failed to obtain request ID from Black Forest AI API');
@@ -121,18 +155,41 @@ const generateImage = async (prompt) => {
       // Wait 500ms between polls
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      const resultResponse = await axios.get(
-        `https://api.us1.bfl.ai/v1/get_result?id=${requestId}`,
-        {
-          headers: {
-            'accept': 'application/json',
-            'x-key': apiKey
+      let resultResponse;
+      try {
+        resultResponse = await axios.get(
+          `https://api.us1.bfl.ai/v1/get_result?id=${requestId}`,
+          {
+            headers: {
+              'accept': 'application/json',
+              'x-key': apiKey
+            }
           }
+        );
+      } catch (pollError) {
+        // Check for payment required errors in polling request
+        if (pollError.response && pollError.response.status === 402) {
+          logger.error('Black Forest AI returned 402 Payment Required status during polling');
+          throw new Error('Payment required for image generation (402)');
         }
-      );
+        
+        logger.error(`Error polling for results: ${pollError.message}`);
+        throw pollError;
+      }
       
       if (resultResponse.data.status === 'Error') {
-        throw new Error(`Error generating image: ${resultResponse.data.error || 'Unknown error'}`);
+        const errorMsg = resultResponse.data.error || 'Unknown error';
+        
+        // Check for payment issues in error messages
+        if (errorMsg.includes('402') || 
+            errorMsg.toLowerCase().includes('payment') ||
+            errorMsg.toLowerCase().includes('credit') ||
+            errorMsg.toLowerCase().includes('billing')) {
+          logger.error(`Black Forest AI payment issue detected: ${errorMsg}`);
+          throw new Error(`Payment required for image generation: ${errorMsg}`);
+        }
+        
+        throw new Error(`Error generating image: ${errorMsg}`);
       }
       
       if (resultResponse.data.status === 'Ready') {

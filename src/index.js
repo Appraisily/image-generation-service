@@ -75,13 +75,99 @@ app.get('/health', (req, res) => {
   res.status(200).json(healthStatus);
 });
 
+// API documentation endpoint
+app.get('/api/docs', (req, res) => {
+  const apiDocs = {
+    service: 'Art Appraiser Image Generation API',
+    version: '1.0.0',
+    endpoints: [
+      {
+        path: '/api/generate',
+        method: 'POST',
+        description: 'Generate an image for an art appraiser',
+        requestFormat: {
+          appraiser: {
+            id: 'unique-appraiser-id',
+            name: 'Appraiser Name',
+            specialties: ['Fine Art', 'Antiques'],
+            city: 'City Name',
+            state: 'State Name'
+          },
+          customPrompt: 'Optional custom prompt to override automatic generation'
+        },
+        responseFormat: {
+          success: true,
+          data: {
+            imageUrl: 'https://example.com/image.jpg',
+            originalUrl: 'https://original-source.com/image.jpg',
+            cached: false,
+            prompt: 'The prompt used to generate the image',
+            source: 'black-forest-ai'
+          }
+        },
+        notes: 'The appraiser.id field is required. Other fields improve image quality but are optional.'
+      },
+      {
+        path: '/api/generate-location',
+        method: 'POST',
+        description: 'Generate an image for a location',
+        requestFormat: {
+          location: {
+            id: 'unique-location-id',
+            name: 'Location Name',
+            state: 'State Name'
+          },
+          customPrompt: 'Optional custom prompt to override automatic generation'
+        }
+      },
+      {
+        path: '/api/generate-bulk',
+        method: 'POST',
+        description: 'Generate images for multiple appraisers',
+        requestFormat: {
+          appraisers: [
+            {
+              id: 'appraiser-id-1',
+              name: 'Appraiser Name 1',
+              specialties: ['Fine Art', 'Antiques']
+            },
+            {
+              id: 'appraiser-id-2',
+              name: 'Appraiser Name 2',
+              specialties: ['Jewelry', 'Watches']
+            }
+          ]
+        }
+      }
+    ],
+    errorCodes: {
+      400: 'Bad Request - Missing required fields',
+      402: 'Payment Required - Black Forest AI credit limit exceeded',
+      500: 'Internal Server Error - Error generating or processing image'
+    }
+  };
+  
+  res.status(200).json(apiDocs);
+});
+
 // Generate image endpoint
 app.post('/api/generate', async (req, res) => {
   try {
     const { appraiser, customPrompt } = req.body;
     
-    if (!appraiser || !appraiser.id) {
-      return res.status(400).json({ error: 'Invalid appraiser data. ID is required.' });
+    // Improved request validation with helpful error messages
+    if (!appraiser) {
+      return res.status(400).json({ 
+        error: 'Missing appraiser object in request body', 
+        help: 'Request body must include an appraiser object. See /api/docs for proper format.'
+      });
+    }
+    
+    if (!appraiser.id) {
+      return res.status(400).json({ 
+        error: 'Invalid appraiser data. ID is required.',
+        help: 'The appraiser object must include an id field. See /api/docs for proper format.'
+      });
     }
     
     logger.info(`Received request to generate image for appraiser: ${appraiser.id}`);
@@ -94,6 +180,16 @@ app.post('/api/generate', async (req, res) => {
       const result = await imageGenerator.generateImage(appraiser, customPrompt);
       
       if (result.error) {
+        // Handle payment required errors specifically
+        if (result.error.includes('Payment required') || result.error.includes('402')) {
+          logger.error(`Black Forest AI payment issue: ${result.error}`);
+          return res.status(402).json({ 
+            error: 'Payment required for image generation service',
+            details: result.error,
+            resolution: 'Please check the Black Forest AI account status and billing information.'
+          });
+        }
+        
         logger.error(`Error generating image: ${result.error}`);
         return res.status(500).json({ error: result.error });
       }
@@ -103,6 +199,16 @@ app.post('/api/generate', async (req, res) => {
         data: result
       });
     } catch (error) {
+      // Special handling for 402 errors
+      if (error.message.includes('402') || error.message.toLowerCase().includes('payment required')) {
+        logger.error(`Black Forest AI payment issue: ${error.message}`);
+        return res.status(402).json({ 
+          error: 'Payment required for image generation service',
+          details: error.message,
+          resolution: 'Please check the Black Forest AI account status and billing information.'
+        });
+      }
+      
       logger.error(`Error generating image: ${error.message}`);
       return res.status(500).json({ error: `Error generating image: ${error.message}` });
     }

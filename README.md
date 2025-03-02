@@ -107,6 +107,7 @@ The service exposes the following endpoints:
 - `POST /api/generate-bulk`: Generate images for multiple appraisers
 - `GET /api/prompt/:appraiserId`: Get the prompt used for an appraiser's image
 - `GET /health`: Health check endpoint
+- `GET /api/docs`: Returns detailed API documentation including request formats and error codes
 
 ## Dependencies
 
@@ -242,3 +243,66 @@ The service implements a multi-level caching strategy:
 2. **Local Filesystem Cache**: Images are stored locally in the `data/images` directory
 3. **Google Cloud Storage Cache**: Images are also stored in Google Cloud Storage
 4. **Manifest File**: A `cache-manifest.json`
+
+## Request Format
+
+### Generate Image for Appraiser
+```json
+POST /api/generate
+{
+  "appraiser": {
+    "id": "unique-appraiser-id",
+    "name": "Appraiser Name",
+    "specialties": ["Fine Art", "Antiques"],
+    "city": "City Name",
+    "state": "State Name"
+  },
+  "customPrompt": "Optional custom prompt to override automatic generation"
+}
+```
+
+The `appraiser.id` field is required. Other fields improve image quality but are optional.
+
+## Error Handling
+
+The service returns appropriate HTTP status codes and descriptive error messages:
+
+- `400 Bad Request` - Missing required fields
+- `402 Payment Required` - Black Forest AI credit limit exceeded
+- `500 Internal Server Error` - Error generating or processing image
+
+### Payment Required Errors (402)
+
+When the Black Forest AI service returns a 402 error (payment required), the API will return a descriptive error message with the status code 402:
+
+```json
+{
+  "error": "Payment required for image generation service",
+  "details": "Request failed with status code 402",
+  "resolution": "Please check the Black Forest AI account status and billing information."
+}
+```
+
+## Debugging Tools
+
+Several testing and debugging tools are available in the repository:
+
+- `test-api-debug.js` - A comprehensive test script that makes various API calls and logs the responses
+- `test-bfai-client.js` - Tests the Black Forest AI client directly
+- `test-generation.js` - Tests the image generation functionality
+- `test-bulk.js` - Tests the bulk generation endpoint
+
+To run the debug test script:
+
+```bash
+# Install dependencies if needed
+npm install
+
+# Set the API URL in your .env file or use the default
+echo "API_URL=https://your-api-url.app" > .env
+
+# Run the test
+node test-api-debug.js
+```
+
+The script will create a detailed log file with request and response information.
