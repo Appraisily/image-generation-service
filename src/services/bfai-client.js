@@ -105,12 +105,20 @@ const generateImage = async (prompt) => {
         }
       );
     } catch (apiError) {
+      // Use the enhanced API error logging with request data
+      const requestData = {
+        prompt: prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''),
+        endpoint: 'flux-pro-1.1'
+      };
+      
+      logger.apiError('Black Forest AI (Submit)', apiError, requestData);
+      
       // Check for payment required errors in initial request
       if (apiError.response) {
         const statusCode = apiError.response.status;
         
         if (statusCode === 402) {
-          logger.error('Black Forest AI returned 402 Payment Required status');
+          logger.paymentError('Black Forest AI returned 402 Payment Required status');
           throw new Error('Payment required for image generation (402)');
         }
         
@@ -123,7 +131,7 @@ const generateImage = async (prompt) => {
                 errorData.error.toLowerCase().includes('payment') ||
                 errorData.error.toLowerCase().includes('credit') ||
                 errorData.error.toLowerCase().includes('billing')) {
-              logger.error(`Black Forest AI payment issue detected: ${errorData.error}`);
+              logger.paymentError(`Black Forest AI payment issue detected: ${errorData.error}`);
               throw new Error(`Payment required for image generation: ${errorData.error}`);
             }
           }
@@ -167,9 +175,12 @@ const generateImage = async (prompt) => {
           }
         );
       } catch (pollError) {
+        // Use the enhanced API error logging
+        logger.apiError(`Black Forest AI (Poll - Attempt ${attempts})`, pollError, { requestId });
+        
         // Check for payment required errors in polling request
         if (pollError.response && pollError.response.status === 402) {
-          logger.error('Black Forest AI returned 402 Payment Required status during polling');
+          logger.paymentError('Black Forest AI returned 402 Payment Required status during polling');
           throw new Error('Payment required for image generation (402)');
         }
         
@@ -185,7 +196,7 @@ const generateImage = async (prompt) => {
             errorMsg.toLowerCase().includes('payment') ||
             errorMsg.toLowerCase().includes('credit') ||
             errorMsg.toLowerCase().includes('billing')) {
-          logger.error(`Black Forest AI payment issue detected: ${errorMsg}`);
+          logger.paymentError(`Black Forest AI payment issue detected: ${errorMsg}`);
           throw new Error(`Payment required for image generation: ${errorMsg}`);
         }
         

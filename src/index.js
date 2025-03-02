@@ -59,6 +59,131 @@ if (process.env.NODE_ENV !== 'production') {
   app.use('/prompts', express.static(path.join(__dirname, '../data/prompts')));
 }
 
+// Basic HTML documentation page for the root route
+app.get('/', (req, res) => {
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Art Appraiser Image Generation API</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 { color: #2c3e50; }
+    h2 { color: #3498db; margin-top: 30px; }
+    h3 { color: #2980b9; }
+    pre {
+      background-color: #f8f8f8;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      padding: 15px;
+      overflow: auto;
+    }
+    code {
+      font-family: Consolas, Monaco, 'Andale Mono', monospace;
+      background-color: #f8f8f8;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    .error { color: #e74c3c; }
+    .note { 
+      background-color: #f9f9f9;
+      border-left: 4px solid #3498db;
+      padding: 10px 15px;
+      margin: 20px 0;
+    }
+    .warning {
+      background-color: #fff8dc;
+      border-left: 4px solid #f39c12;
+      padding: 10px 15px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Art Appraiser Image Generation API</h1>
+  <p>This service provides an API for generating AI-powered images for art appraisers.</p>
+  
+  <div class="note">
+    <strong>Developer Note:</strong> For detailed API documentation in JSON format, visit <a href="/api/docs">/api/docs</a>
+  </div>
+  
+  <h2>API Endpoints</h2>
+  
+  <h3>GET /api/docs</h3>
+  <p>Returns detailed API documentation in JSON format.</p>
+  
+  <h3>GET /health</h3>
+  <p>Returns the health status and configuration of the service.</p>
+  
+  <h3>POST /api/generate</h3>
+  <p>Generate an image for an art appraiser.</p>
+  <h4>Request Format:</h4>
+  <pre><code>{
+  "appraiser": {
+    "id": "unique-appraiser-id",
+    "name": "Appraiser Name",
+    "specialties": ["Fine Art", "Antiques"],
+    "city": "City Name",
+    "state": "State Name"
+  },
+  "customPrompt": "Optional custom prompt to override automatic generation"
+}</code></pre>
+  
+  <h4>Required Fields:</h4>
+  <ul>
+    <li><code>appraiser.id</code> - A unique identifier for the appraiser</li>
+  </ul>
+  
+  <h4>Optional Fields:</h4>
+  <ul>
+    <li><code>appraiser.name</code> - The appraiser's name</li>
+    <li><code>appraiser.specialties</code> - An array of specialties</li>
+    <li><code>appraiser.city</code> - The city where the appraiser is located</li>
+    <li><code>appraiser.state</code> - The state where the appraiser is located</li>
+    <li><code>customPrompt</code> - A custom prompt to override the automatic prompt generation</li>
+  </ul>
+  
+  <h2>Common Errors</h2>
+  
+  <h3>400 Bad Request</h3>
+  <p>Missing required fields in the request.</p>
+  <pre><code>{
+  "error": "Missing appraiser object in request body",
+  "help": "Request body must include an appraiser object. See /api/docs for proper format."
+}</code></pre>
+  
+  <h3>402 Payment Required</h3>
+  <p>The image generation service has exhausted its credits or requires payment.</p>
+  <pre><code>{
+  "error": "Payment required for image generation service",
+  "details": "Request failed with status code 402",
+  "resolution": "Please check the Black Forest AI account status and billing information."
+}</code></pre>
+  
+  <div class="warning">
+    <strong>Important:</strong> If you encounter 402 errors, the Black Forest AI service account needs to be recharged with credits.
+    This cannot be fixed through code changes.
+  </div>
+  
+  <h2>Debugging</h2>
+  <p>For debugging issues with the API, try running the <code>test-api-debug.js</code> script in the repository which makes various API calls with different parameter formats.</p>
+</body>
+</html>
+  `;
+  
+  res.set('Content-Type', 'text/html');
+  res.send(html);
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   const healthStatus = {
@@ -182,7 +307,7 @@ app.post('/api/generate', async (req, res) => {
       if (result.error) {
         // Handle payment required errors specifically
         if (result.error.includes('Payment required') || result.error.includes('402')) {
-          logger.error(`Black Forest AI payment issue: ${result.error}`);
+          logger.paymentError(`Black Forest AI payment issue: ${result.error}`);
           return res.status(402).json({ 
             error: 'Payment required for image generation service',
             details: result.error,
@@ -201,7 +326,7 @@ app.post('/api/generate', async (req, res) => {
     } catch (error) {
       // Special handling for 402 errors
       if (error.message.includes('402') || error.message.toLowerCase().includes('payment required')) {
-        logger.error(`Black Forest AI payment issue: ${error.message}`);
+        logger.paymentError(`Black Forest AI payment issue: ${error.message}`);
         return res.status(402).json({ 
           error: 'Payment required for image generation service',
           details: error.message,
