@@ -70,9 +70,10 @@ const imageGenerator = {
   /**
    * Generate an image for an appraiser
    * @param {Object} appraiser - The appraiser data
+   * @param {string} customPrompt - Optional custom prompt to override automatic generation
    * @returns {Promise<Object>} - The generated image data
    */
-  async generateImage(appraiser) {
+  async generateImage(appraiser, customPrompt = null) {
     try {
       // Generate appraiser data hash for caching
       const appraiserDataHash = this.generateAppraiserDataHash(appraiser);
@@ -83,13 +84,21 @@ const imageGenerator = {
       
       // Create a prompt for the image generation
       let prompt;
-      try {
-        // Try to use OpenAI API for generating a detailed prompt
-        prompt = await this.createPromptWithGPT(appraiser);
-      } catch (error) {
-        logger.warn(`OpenAI API Key not provided. Falling back to basic prompt generation.`);
-        logger.info(`In production, ensure OPEN_AI_API_SEO is available from Secret Manager`);
-        prompt = this.createBasicPrompt(appraiser);
+      
+      // If customPrompt is provided, use it directly instead of generating one
+      if (customPrompt) {
+        logger.info(`Using provided custom prompt for appraiser: ${appraiser.id}`);
+        prompt = customPrompt;
+      } else {
+        // Otherwise, generate a prompt automatically
+        try {
+          // Try to use OpenAI API for generating a detailed prompt
+          prompt = await this.createPromptWithGPT(appraiser);
+        } catch (error) {
+          logger.warn(`OpenAI API Key not provided. Falling back to basic prompt generation.`);
+          logger.info(`In production, ensure OPEN_AI_API_SEO is available from Secret Manager`);
+          prompt = this.createBasicPrompt(appraiser);
+        }
       }
       
       // Log the prompt (without PII)
