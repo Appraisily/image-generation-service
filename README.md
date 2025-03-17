@@ -91,7 +91,39 @@ Generate images for multiple appraisers in a single request.
 }
 ```
 
-### 4. Get Prompt for Appraiser
+### 4. Upload Image
+`POST /api/upload`
+
+Upload an image from a URL or base64 data to ImageKit.
+
+#### Request Body
+```json
+{
+  "source": "url",                            // Required - either "url" or "base64"
+  "data": "https://example.com/image.jpg",    // Required - URL or base64 string
+  "fileName": "custom-file-name",             // Optional - defaults to timestamp-based name
+  "folder": "custom/folder/path",             // Optional - defaults to "uploaded-images"
+  "tags": ["tag1", "tag2"],                   // Optional - tags for the image
+  "metadata": {                               // Optional - additional metadata
+    "key": "value"
+  }
+}
+```
+
+#### Response
+```json
+{
+  "success": true,
+  "data": {
+    "url": "https://ik.imagekit.io/yourEndpoint/path/to/image.jpg",
+    "fileId": "file_id_returned_by_imagekit",
+    "name": "final_file_name",
+    "size": 12345
+  }
+}
+```
+
+### 5. Get Prompt for Appraiser
 `GET /api/prompt/:appraiserId`
 
 Retrieve the prompt used to generate an appraiser's image.
@@ -106,7 +138,7 @@ Retrieve the prompt used to generate an appraiser's image.
 }
 ```
 
-### 5. Health Check
+### 6. Health Check
 `GET /health`
 
 Check the service's health and configuration status.
@@ -123,14 +155,14 @@ Check the service's health and configuration status.
 }
 ```
 
-### 6. API Documentation
+### 7. API Documentation
 `GET /api/docs`
 
 Get detailed API documentation in JSON format.
 
 ## Error Codes
 
-- `400`: Bad Request - Missing required fields
+- `400`: Bad Request - Missing required fields or invalid source type
 - `402`: Payment Required - Black Forest AI credit limit exceeded
 - `404`: Not Found - Resource not found
 - `500`: Internal Server Error - Error generating or processing image
@@ -158,6 +190,7 @@ Generated images are stored and served through ImageKit CDN for optimal delivery
 3. Use bulk generation for multiple images to optimize processing
 4. Implement proper error handling in your client code
 5. Cache the returned image URLs on your end when possible
+6. For custom images, use the `/api/upload` endpoint to directly upload images to ImageKit
 
 ## Support
 
