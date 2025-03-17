@@ -49,7 +49,123 @@ logger.info(`- OpenAI API Key configured: ${process.env.OPEN_AI_API_SEO ? 'Yes' 
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+
+// Custom JSON parsing middleware with error handling
+app.use((req, res, next) => {
+  // Only apply to JSON content type
+  if (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) {
+    let body = '';
+    
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    
+    req.on('end', () => {
+      if (body) {
+        try {
+          req.body = JSON.parse(body);
+          next();
+        } catch (error) {
+          // Get the endpoint being accessed
+          const endpoint = req.originalUrl;
+          
+          // Log the error with the malformed JSON
+          logger.error(`Malformed JSON in request to ${endpoint}: ${error.message}`);
+          logger.debug(`Malformed JSON body: ${body}`);
+          
+          // Send helpful response based on the endpoint
+          let instruction = '';
+          let example = {};
+          
+          switch (endpoint) {
+            case '/api/generate':
+              instruction = 'This endpoint requires a valid JSON object with an appraiser object containing at least an id field.';
+              example = {
+                appraiser: {
+                  id: "appraiser-123",
+                  firstName: "John",
+                  lastName: "Doe",
+                  specialty: "Fine Art"
+                },
+                customPrompt: "Optional custom prompt"
+              };
+              break;
+              
+            case '/api/generate-location':
+              instruction = 'This endpoint requires a valid JSON object with a location object containing at least an id field.';
+              example = {
+                location: {
+                  id: "location-123",
+                  name: "Art Gallery Name",
+                  type: "gallery",
+                  city: "New York",
+                  state: "NY"
+                },
+                customPrompt: "Optional custom prompt"
+              };
+              break;
+              
+            case '/api/generate-bulk':
+              instruction = 'This endpoint requires a valid JSON object with an appraisers array containing at least one appraiser with an id.';
+              example = {
+                appraisers: [
+                  {
+                    id: "appraiser-123",
+                    firstName: "John",
+                    lastName: "Doe"
+                  },
+                  {
+                    id: "appraiser-456",
+                    firstName: "Jane",
+                    lastName: "Smith"
+                  }
+                ]
+              };
+              break;
+              
+            case '/api/upload':
+              instruction = 'This endpoint requires a valid JSON object with source (url or base64) and data fields.';
+              example = {
+                source: "url",
+                data: "https://example.com/image.jpg",
+                fileName: "optional-filename",
+                folder: "optional/folder/path"
+              };
+              break;
+              
+            default:
+              instruction = 'This endpoint requires a valid JSON payload.';
+              example = { message: "Please check the API documentation for the correct format" };
+          }
+          
+          // Return helpful error response
+          return res.status(400).json({
+            error: 'Malformed JSON in request body',
+            message: `Unable to parse JSON: ${error.message}`,
+            instruction: instruction,
+            example: example,
+            tip: 'Ensure your JSON is properly formatted with quotes around keys and string values.'
+          });
+        }
+      } else {
+        next();
+      }
+    });
+  } else {
+    next();
+  }
+});
+
+// Standard middleware for already parsed bodies (e.g., from form submissions)
+app.use(express.json({ 
+  verify: (req, res, buf, encoding) => {
+    // This will be skipped if our custom middleware already parsed the JSON
+    if (req.body && Object.keys(req.body).length > 0) {
+      // Body already parsed by our custom middleware
+      return;
+    }
+  }
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Serve cached images
@@ -576,6 +692,62 @@ app.post('/api/upload', async (req, res) => {
     logger.error(`API error in upload endpoint: ${error.message}`);
     return res.status(500).json({ error: error.message });
   }
+});
+
+// Global error handler middleware
+app.use((err, req, res, next) => {
+  // Log the error
+  logger.error(`Unhandled error: ${err.message}`);
+  logger.debug(err.stack);
+  
+  // Get the endpoint being accessed for customized help
+  const endpoint = req.originalUrl;
+  
+  // Default error response
+  let errorResponse = {
+    error: 'Internal server error',
+    message: err.message
+  };
+  
+  // Check for specific error types
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    // JSON syntax error
+    errorResponse = {
+      error: 'Invalid JSON syntax',
+      message: 'The request contains malformed JSON'
+    };
+    
+    // Add endpoint-specific help
+    switch (endpoint) {
+      case '/api/generate':
+        errorResponse.help = 'This endpoint requires an appraiser object with an id field';
+        errorResponse.example = {
+          appraiser: { id: "appraiser-123" }
+        };
+        break;
+      case '/api/upload':
+        errorResponse.help = 'This endpoint requires source and data fields';
+        errorResponse.example = {
+          source: "url",
+          data: "https://example.com/image.jpg"
+        };
+        break;
+      // Add other endpoints as needed
+    }
+    
+    return res.status(400).json(errorResponse);
+  }
+  
+  // For 4xx errors, we can be more helpful
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({
+      error: err.message,
+      help: 'Check the API documentation at /api/docs for correct usage'
+    });
+  }
+  
+  // Default to 500 for other errors
+  res.status(500).json(errorResponse);
 });
 
 // Start server

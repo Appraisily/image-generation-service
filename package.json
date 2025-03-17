@@ -10,7 +10,8 @@
     "build": "npm install",
     "generate-bulk": "node src/scripts/generate-bulk-images.js",
     "generate-images": "node src/generate-images.js",
-    "test-upload": "node test-upload.js"
+    "test-upload": "node test-upload.js",
+    "test-errors": "node test-error-handling.js"
   },
   "author": "Appraisily",
   "license": "ISC",
