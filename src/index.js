@@ -680,6 +680,14 @@ app.post('/api/upload', async (req, res) => {
     
     logger.info(`Received image upload request. Source: ${source}, Folder: ${folder || 'default'}`);
     
+    // Debug information about the data being received
+    if (source.toLowerCase() === 'base64') {
+      const dataType = typeof data;
+      const dataLength = data ? data.length : 0;
+      const dataStart = data ? data.substring(0, 30) : 'empty';
+      logger.debug(`Base64 image data received. Type: ${dataType}, Length: ${dataLength}, Preview: ${dataStart}...`);
+    }
+    
     try {
       // Upload the image
       const result = await imageUploader.uploadImage({
@@ -699,6 +707,7 @@ app.post('/api/upload', async (req, res) => {
       
     } catch (error) {
       logger.error(`Error uploading image: ${error.message}`);
+      logger.error(`Error stack: ${error.stack}`);
       return res.status(500).json({ 
         error: `Failed to upload image: ${error.message}` 
       });

@@ -49,17 +49,36 @@ const imageUploader = {
       switch (source.toLowerCase()) {
         case 'base64':
           // Handle base64 data upload
-          result = await imagekitClient.uploadImageFromBase64(data, fileName, uploadOptions);
+          logger.debug(`Sending base64 data to ImageKit. Data type: ${typeof data}, length: ${data ? data.length : 0}`);
+          try {
+            result = await imagekitClient.uploadImageFromBase64(data, fileName, uploadOptions);
+          } catch (base64Error) {
+            logger.error(`Base64 upload failed: ${base64Error.message}`);
+            logger.error(`Base64 error stack: ${base64Error.stack}`);
+            throw base64Error;
+          }
           break;
 
         case 'url':
           // Handle URL-based upload
-          result = await imagekitClient.uploadImageFromUrl(data, fileName, uploadOptions);
+          logger.debug(`Sending URL to ImageKit: ${data ? (typeof data === 'string' ? data.substring(0, 30) + '...' : typeof data) : 'undefined'}`);
+          try {
+            result = await imagekitClient.uploadImageFromUrl(data, fileName, uploadOptions);
+          } catch (urlError) {
+            logger.error(`URL upload failed: ${urlError.message}`);
+            throw urlError;
+          }
           break;
 
         case 'buffer':
           // Handle buffer upload
-          result = await imagekitClient.uploadImage(data, fileName, uploadOptions);
+          logger.debug(`Sending buffer to ImageKit. Buffer size: ${data ? (Buffer.isBuffer(data) ? data.length : 'Not a buffer') : 'undefined'}`);
+          try {
+            result = await imagekitClient.uploadImage(data, fileName, uploadOptions);
+          } catch (bufferError) {
+            logger.error(`Buffer upload failed: ${bufferError.message}`);
+            throw bufferError;
+          }
           break;
 
         default:
@@ -70,6 +89,7 @@ const imageUploader = {
       return result;
     } catch (error) {
       logger.error(`Error in image upload: ${error.message}`);
+      logger.error(`Error stack: ${error.stack}`);
       throw error;
     }
   },

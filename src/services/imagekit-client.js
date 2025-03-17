@@ -117,6 +117,19 @@ const uploadImage = async (imageBuffer, fileName, options = {}) => {
   try {
     const client = await ensureImageKitClient();
     
+    // Validate imageBuffer
+    if (!imageBuffer) {
+      logger.error('Invalid image buffer: buffer is null or undefined');
+      throw new Error('Image buffer cannot be null or undefined');
+    }
+    
+    if (!Buffer.isBuffer(imageBuffer)) {
+      logger.error(`Invalid image buffer: expected Buffer object but got ${typeof imageBuffer}`);
+      throw new Error(`Expected Buffer object but got ${typeof imageBuffer}`);
+    }
+    
+    logger.debug(`Image buffer validation passed. Buffer size: ${imageBuffer.length} bytes`);
+    
     // Handle case where options is a string (backward compatibility)
     const folder = typeof options === 'string' ? options : (options.folder || 'appraiser-images');
     
@@ -137,21 +150,42 @@ const uploadImage = async (imageBuffer, fileName, options = {}) => {
       uploadOptions.folder = folder;
     }
     
-    const response = await client.upload(uploadOptions);
+    logger.debug(`Prepared upload options: ${JSON.stringify({
+      ...uploadOptions,
+      file: `<Buffer of ${imageBuffer.length} bytes>`
+    })}`);
     
-    if (!response || !response.url) {
-      throw new Error('Failed to get URL from ImageKit upload response');
+    try {
+      logger.debug('Calling ImageKit SDK upload method...');
+      const response = await client.upload(uploadOptions);
+      
+      if (!response) {
+        logger.error('ImageKit upload returned null or undefined response');
+        throw new Error('ImageKit upload failed with an empty response');
+      }
+      
+      logger.debug(`ImageKit upload response: ${JSON.stringify(response)}`);
+      
+      if (!response.url) {
+        logger.error(`ImageKit response missing URL: ${JSON.stringify(response)}`);
+        throw new Error('Failed to get URL from ImageKit upload response');
+      }
+      
+      logger.info(`Successfully uploaded image to ImageKit: ${response.url}`);
+      return {
+        url: response.url,
+        fileId: response.fileId,
+        name: response.name,
+        size: response.size
+      };
+    } catch (uploadError) {
+      logger.error(`ImageKit upload SDK error: ${uploadError.message}`);
+      logger.error(`ImageKit error stack: ${uploadError.stack}`);
+      throw uploadError;
     }
-    
-    logger.info(`Successfully uploaded image to ImageKit: ${response.url}`);
-    return {
-      url: response.url,
-      fileId: response.fileId,
-      name: response.name,
-      size: response.size
-    };
   } catch (error) {
     logger.error(`Error uploading image to ImageKit: ${error.message}`);
+    logger.error(`Upload error stack: ${error.stack}`);
     throw error;
   }
 };
@@ -220,23 +254,60 @@ const uploadImageFromUrl = async (imageUrl, fileName = null, options = {}) => {
  */
 const uploadImageFromBase64 = async (base64Data, fileName, options = {}) => {
   try {
+    logger.debug(`Processing base64 upload for fileName: ${fileName}`);
+    
+    // Validate input
+    if (!base64Data) {
+      logger.error('Base64 data is empty or undefined');
+      throw new Error('Base64 data cannot be empty');
+    }
+    
+    logger.debug(`Base64 data type: ${typeof base64Data}, length: ${base64Data.length}`);
+
     // If base64 string includes data URI prefix, remove it
     let imageData = base64Data;
     if (base64Data.startsWith('data:')) {
+      logger.debug('Base64 data contains data URI prefix, attempting to extract content');
       const matches = base64Data.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
+        const mimeType = matches[1];
         imageData = matches[2];
+        logger.debug(`Data URI prefix removed. MIME type: ${mimeType}, data length: ${imageData.length}`);
+      } else {
+        logger.warn('Failed to parse data URI prefix properly, using raw input');
       }
     }
     
-    // Convert base64 to buffer
-    const imageBuffer = Buffer.from(imageData, 'base64');
+    // Basic validation of base64 characters
+    if (!/^[A-Za-z0-9+/=]+$/.test(imageData)) {
+      logger.warn('Base64 data contains invalid characters');
+    }
     
-    // Use the uploadImage function with the buffer
-    return await uploadImage(imageBuffer, fileName, options);
+    try {
+      // Convert base64 to buffer
+      logger.debug('Converting base64 to buffer...');
+      const imageBuffer = Buffer.from(imageData, 'base64');
+      logger.debug(`Buffer created successfully. Size: ${imageBuffer.length} bytes`);
+      
+      // Check if buffer is valid
+      if (imageBuffer.length === 0) {
+        logger.error('Generated buffer is empty');
+        throw new Error('Failed to create valid buffer from base64 data');
+      }
+      
+      // Use the uploadImage function with the buffer
+      logger.debug('Proceeding to upload buffer to ImageKit');
+      return await uploadImage(imageBuffer, fileName, options);
+      
+    } catch (bufferError) {
+      logger.error(`Buffer conversion error: ${bufferError.message}`);
+      logger.error(`Buffer error stack: ${bufferError.stack}`);
+      throw new Error(`Failed to process base64 data: ${bufferError.message}`);
+    }
     
   } catch (error) {
     logger.error(`Error uploading base64 image to ImageKit: ${error.message}`);
+    logger.error(`Base64 upload error stack: ${error.stack}`);
     throw error;
   }
 };
