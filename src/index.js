@@ -55,8 +55,22 @@ app.use((req, res, next) => {
   // Only apply to JSON content type
   if (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) {
     let body = '';
+    let bodySize = 0;
+    const maxBodySize = 50 * 1024 * 1024; // 50MB limit
     
     req.on('data', chunk => {
+      bodySize += chunk.length;
+      if (bodySize > maxBodySize) {
+        // If body exceeds limit, respond with 413 error
+        logger.error(`Request entity too large: ${bodySize} bytes exceeds ${maxBodySize} bytes limit`);
+        res.status(413).json({ 
+          error: 'Request entity too large',
+          message: `Request body exceeds ${maxBodySize / (1024 * 1024)}MB limit`,
+          help: 'Try reducing the size of your request or use a different upload method'
+        });
+        req.destroy(); // End the request
+        return;
+      }
       body += chunk.toString();
     });
     
@@ -158,6 +172,7 @@ app.use((req, res, next) => {
 
 // Standard middleware for already parsed bodies (e.g., from form submissions)
 app.use(express.json({ 
+  limit: '50mb',  // Increase JSON body size limit to 50MB
   verify: (req, res, buf, encoding) => {
     // This will be skipped if our custom middleware already parsed the JSON
     if (req.body && Object.keys(req.body).length > 0) {
@@ -166,7 +181,7 @@ app.use(express.json({
     }
   }
 }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Increase URL-encoded body size limit to 50MB
 
 // Serve cached images
 app.use('/images', express.static(path.join(__dirname, '../data/images')));
