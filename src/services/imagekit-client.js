@@ -110,21 +110,32 @@ const ensureImageKitClient = async () => {
  * Upload an image buffer to ImageKit
  * @param {Buffer} imageBuffer - The image buffer to upload
  * @param {String} fileName - The file name to use
- * @param {String} folder - The folder to upload to (optional)
+ * @param {Object|String} options - The upload options or folder string
  * @returns {Promise<Object>} - The upload response including the URL
  */
-const uploadImage = async (imageBuffer, fileName, folder = 'appraiser-images') => {
+const uploadImage = async (imageBuffer, fileName, options = {}) => {
   try {
     const client = await ensureImageKitClient();
     
-    logger.info(`Uploading image to ImageKit: ${fileName}`);
+    // Handle case where options is a string (backward compatibility)
+    const folder = typeof options === 'string' ? options : (options.folder || 'appraiser-images');
     
+    logger.info(`Uploading image to ImageKit: ${fileName} in folder: ${folder}`);
+    
+    // Create upload options, merging any provided options
     const uploadOptions = {
       file: imageBuffer,
       fileName: fileName,
       folder: folder,
-      useUniqueFileName: true
+      useUniqueFileName: true,
+      ...(typeof options === 'object' ? options : {})
     };
+    
+    // Remove folder from uploadOptions if it was added above to avoid duplication
+    if (typeof options === 'object' && options.folder) {
+      delete uploadOptions.folder;
+      uploadOptions.folder = folder;
+    }
     
     const response = await client.upload(uploadOptions);
     
@@ -149,10 +160,10 @@ const uploadImage = async (imageBuffer, fileName, folder = 'appraiser-images') =
  * Upload an image from a URL to ImageKit
  * @param {String} imageUrl - The URL of the image to upload
  * @param {String} fileName - The file name to use (optional)
- * @param {String} folder - The folder to upload to (optional)
+ * @param {Object|String} options - The upload options or folder string
  * @returns {Promise<Object>} - The upload response including the URL
  */
-const uploadImageFromUrl = async (imageUrl, fileName = null, folder = 'appraiser-images') => {
+const uploadImageFromUrl = async (imageUrl, fileName = null, options = {}) => {
   try {
     const client = await ensureImageKitClient();
     
@@ -161,14 +172,25 @@ const uploadImageFromUrl = async (imageUrl, fileName = null, folder = 'appraiser
       fileName = `image_${Date.now()}.jpg`;
     }
     
-    logger.info(`Uploading image from URL to ImageKit: ${fileName}`);
+    // Handle case where options is a string (backward compatibility)
+    const folder = typeof options === 'string' ? options : (options.folder || 'appraiser-images');
     
+    logger.info(`Uploading image from URL to ImageKit: ${fileName} in folder: ${folder}`);
+    
+    // Create upload options, merging any provided options
     const uploadOptions = {
       file: imageUrl,
       fileName: fileName,
       folder: folder,
-      useUniqueFileName: true
+      useUniqueFileName: true,
+      ...(typeof options === 'object' ? options : {})
     };
+    
+    // Remove folder from uploadOptions if it was added above to avoid duplication
+    if (typeof options === 'object' && options.folder) {
+      delete uploadOptions.folder;
+      uploadOptions.folder = folder;
+    }
     
     const response = await client.upload(uploadOptions);
     
@@ -189,8 +211,39 @@ const uploadImageFromUrl = async (imageUrl, fileName = null, folder = 'appraiser
   }
 };
 
+/**
+ * Upload an image from base64 string to ImageKit
+ * @param {String} base64Data - The base64 string of the image (with or without data URI prefix)
+ * @param {String} fileName - The file name to use
+ * @param {Object|String} options - The upload options or folder string
+ * @returns {Promise<Object>} - The upload response including the URL
+ */
+const uploadImageFromBase64 = async (base64Data, fileName, options = {}) => {
+  try {
+    // If base64 string includes data URI prefix, remove it
+    let imageData = base64Data;
+    if (base64Data.startsWith('data:')) {
+      const matches = base64Data.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        imageData = matches[2];
+      }
+    }
+    
+    // Convert base64 to buffer
+    const imageBuffer = Buffer.from(imageData, 'base64');
+    
+    // Use the uploadImage function with the buffer
+    return await uploadImage(imageBuffer, fileName, options);
+    
+  } catch (error) {
+    logger.error(`Error uploading base64 image to ImageKit: ${error.message}`);
+    throw error;
+  }
+};
+
 module.exports = {
   uploadImage,
   uploadImageFromUrl,
+  uploadImageFromBase64,
   ensureImageKitClient
 }; 

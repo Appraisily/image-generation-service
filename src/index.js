@@ -9,6 +9,7 @@ const cors = require('cors');
 const fs = require('fs-extra');
 const path = require('path');
 const imageGenerator = require('./services/image-generator');
+const imageUploader = require('./services/image-uploader');
 const { logger } = require('./utils/logger');
 
 // Initialize Express app
@@ -137,6 +138,20 @@ app.get('/', (req, res) => {
   },
   "customPrompt": "Optional custom prompt to override automatic generation"
 }</code></pre>
+
+  <h3>POST /api/upload</h3>
+  <p>Upload an image from URL or base64 to ImageKit.</p>
+  <h4>Request Format:</h4>
+  <pre><code>{
+  "source": "url", // or "base64"
+  "data": "https://example.com/image.jpg", // or base64 string
+  "fileName": "optional-file-name",
+  "folder": "optional/folder/path", 
+  "tags": ["optional", "image", "tags"],
+  "metadata": {
+    "optional": "metadata"
+  }
+}</code></pre>
   
   <h4>Required Fields:</h4>
   <ul>
@@ -263,6 +278,31 @@ app.get('/api/docs', (req, res) => {
             }
           ]
         }
+      },
+      {
+        path: '/api/upload',
+        method: 'POST',
+        description: 'Upload an image to ImageKit from a URL or base64 data',
+        requestFormat: {
+          source: 'url or base64',
+          data: 'The URL or base64 string of the image',
+          fileName: 'Optional filename (default: timestamp-based name)',
+          folder: 'Optional folder path on ImageKit (default: uploaded-images)',
+          tags: ['Optional', 'tags', 'for', 'the', 'image'],
+          metadata: {
+            optional: 'Additional metadata for the image'
+          }
+        },
+        responseFormat: {
+          success: true,
+          data: {
+            url: 'https://ik.imagekit.io/yourEndpoint/path/to/image.jpg',
+            fileId: 'file_id_returned_by_imagekit',
+            name: 'final_file_name',
+            size: 12345
+          }
+        },
+        notes: 'Source must be either "url" or "base64". Data must contain the corresponding URL or base64 string.'
       }
     ],
     errorCodes: {
@@ -482,6 +522,58 @@ app.get('/api/prompt/:appraiserId', async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error retrieving prompt: ${error.message}`);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Upload image endpoint
+app.post('/api/upload', async (req, res) => {
+  try {
+    const { source, data, fileName, folder, tags, metadata } = req.body;
+    
+    // Validate required fields
+    if (!source || !data) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        help: 'Request must include "source" (url or base64) and "data" fields'
+      });
+    }
+    
+    // Validate source type
+    if (!['url', 'base64'].includes(source.toLowerCase())) {
+      return res.status(400).json({
+        error: 'Invalid source type',
+        help: 'Source must be either "url" or "base64"'
+      });
+    }
+    
+    logger.info(`Received image upload request. Source: ${source}, Folder: ${folder || 'default'}`);
+    
+    try {
+      // Upload the image
+      const result = await imageUploader.uploadImage({
+        source,
+        data,
+        fileName: fileName || `upload_${Date.now()}`,
+        folder: folder || 'uploaded-images',
+        tags: tags || [],
+        metadata: metadata || {},
+        useUniqueFileName: true
+      });
+      
+      return res.status(200).json({
+        success: true,
+        data: result
+      });
+      
+    } catch (error) {
+      logger.error(`Error uploading image: ${error.message}`);
+      return res.status(500).json({ 
+        error: `Failed to upload image: ${error.message}` 
+      });
+    }
+  } catch (error) {
+    logger.error(`API error in upload endpoint: ${error.message}`);
     return res.status(500).json({ error: error.message });
   }
 });
