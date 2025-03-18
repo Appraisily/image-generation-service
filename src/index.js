@@ -685,7 +685,7 @@ app.post('/api/upload', async (req, res) => {
     const isBuffer = Buffer.isBuffer(data);
     const isStream = data && typeof data === 'object' && typeof data.pipe === 'function';
     
-    logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}`);
+    logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}, Length: ${isBuffer ? data.length : 'unknown'}, HasToJSON: ${data && typeof data.toJSON === 'function'}`);
     
     // Handle stream data by converting to buffer
     let processedData = data;
