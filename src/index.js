@@ -671,28 +671,71 @@ app.post('/api/upload', async (req, res) => {
     }
     
     // Validate source type
-    if (!['url', 'base64'].includes(source.toLowerCase())) {
+    if (!['url', 'base64', 'buffer'].includes(source.toLowerCase())) {
       return res.status(400).json({
         error: 'Invalid source type',
-        help: 'Source must be either "url" or "base64"'
+        help: 'Source must be either "url", "base64", or "buffer"'
       });
     }
     
     logger.info(`Received image upload request. Source: ${source}, Folder: ${folder || 'default'}`);
     
-    // Debug information about the data being received
-    if (source.toLowerCase() === 'base64') {
-      const dataType = typeof data;
-      const dataLength = data ? data.length : 0;
-      const dataStart = data ? data.substring(0, 30) : 'empty';
-      logger.debug(`Base64 image data received. Type: ${dataType}, Length: ${dataLength}, Preview: ${dataStart}...`);
+    // Enhanced debug information about the data being received
+    const dataType = typeof data;
+    const isBuffer = Buffer.isBuffer(data);
+    const isStream = data && typeof data === 'object' && typeof data.pipe === 'function';
+    
+    logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}`);
+    
+    // Handle stream data by converting to base64
+    let processedData = data;
+    let processedSource = source;
+    
+    if (isStream) {
+      logger.info(`Detected stream data. Converting to base64 before uploading...`);
+      try {
+        // For streams, we need to convert to base64
+        // But since this is challenging to do with the current API,
+        // we'll reject it with a helpful message
+        return res.status(400).json({
+          error: 'Stream data is not supported directly',
+          help: 'Please convert the stream to base64 string before uploading, or use a URL source type instead'
+        });
+      } catch (streamError) {
+        logger.error(`Error processing stream data: ${streamError.message}`);
+        return res.status(500).json({
+          error: 'Failed to process stream data',
+          help: 'Please convert the stream to base64 string before uploading'
+        });
+      }
+    }
+    
+    // If we receive a buffer for a base64 source, convert it to base64 string
+    if (source.toLowerCase() === 'base64' && isBuffer) {
+      logger.info(`Converting buffer to base64 string for base64 source type`);
+      processedData = data.toString('base64');
+    }
+    
+    // If we receive an object that's not a buffer for base64 source, try to handle it
+    if (source.toLowerCase() === 'base64' && dataType === 'object' && !isBuffer && !isStream) {
+      logger.warn(`Received object for base64 source that is not a buffer. Attempting to stringify...`);
+      try {
+        processedData = JSON.stringify(data);
+        logger.warn(`Converted object to string, but this may not be valid base64`);
+      } catch (jsonError) {
+        logger.error(`Failed to stringify object: ${jsonError.message}`);
+        return res.status(400).json({
+          error: 'Invalid base64 data',
+          help: 'For base64 source, data must be a valid base64 string'
+        });
+      }
     }
     
     try {
-      // Upload the image
+      // Upload the image with the processed data
       const result = await imageUploader.uploadImage({
-        source,
-        data,
+        source: processedSource || source,
+        data: processedData || data,
         fileName: fileName || `upload_${Date.now()}`,
         folder: folder || 'uploaded-images',
         tags: tags || [],

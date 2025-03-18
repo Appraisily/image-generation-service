@@ -126,16 +126,39 @@ const imageGenerator = {
         
         // Upload the image to ImageKit
         let imagekitResponse;
-        try {
-          // Try direct upload with buffer first
-          logger.info('Attempting to upload image buffer to ImageKit');
-          imagekitResponse = await imagekitClient.uploadImage(imageBuffer, fileName);
-        } catch (uploadError) {
-          logger.warn(`Error uploading image buffer to ImageKit: ${uploadError.message}`);
-          logger.info('Falling back to URL-based upload to ImageKit');
-          
-          // Fall back to URL-based upload if buffer upload fails
-          imagekitResponse = await imagekitClient.uploadImageFromUrl(generatedImage.imageUrl, fileName);
+        
+        // Check if we're running remotely (based on environment)
+        const isRemoteEnvironment = process.env.NODE_ENV === 'production' || process.env.IS_CLOUD_RUN === 'true';
+        
+        if (isRemoteEnvironment) {
+          // In remote environment, always use base64 to avoid stream issues
+          logger.info('Running in remote environment, using base64 upload to avoid stream issues');
+          try {
+            // Convert buffer to base64 string
+            const base64Data = imageBuffer.toString('base64');
+            logger.info(`Converted image buffer to base64 string (${base64Data.length} characters)`);
+            
+            // Upload using base64
+            imagekitResponse = await imagekitClient.uploadImageFromBase64(base64Data, fileName);
+          } catch (base64Error) {
+            logger.error(`Base64 upload failed: ${base64Error.message}`);
+            logger.info('Falling back to URL-based upload to ImageKit');
+            
+            // Fall back to URL-based upload if base64 upload fails
+            imagekitResponse = await imagekitClient.uploadImageFromUrl(generatedImage.imageUrl, fileName);
+          }
+        } else {
+          // In local environment, try direct buffer upload first
+          try {
+            logger.info('Attempting to upload image buffer to ImageKit');
+            imagekitResponse = await imagekitClient.uploadImage(imageBuffer, fileName);
+          } catch (uploadError) {
+            logger.warn(`Error uploading image buffer to ImageKit: ${uploadError.message}`);
+            logger.info('Falling back to URL-based upload to ImageKit');
+            
+            // Fall back to URL-based upload if buffer upload fails
+            imagekitResponse = await imagekitClient.uploadImageFromUrl(generatedImage.imageUrl, fileName);
+          }
         }
         
         if (!imagekitResponse || !imagekitResponse.url) {
@@ -404,23 +427,43 @@ const imageGenerator = {
       
       try {
         logger.info(`Uploading image to ImageKit...`);
-        const imagekitResponse = await imagekitClient.uploadImage(
-          imageBuffer,
-          `location_${location.id}`,
-          {
-            folder: '/locations/',
-            tags: ['location', locationType, locationCity, locationState].filter(Boolean),
-            useUniqueFileName: true,
-            isPrivateFile: false,
-            metadata: {
-              locationId: location.id,
-              locationName: locationName,
-              locationType: locationType,
-              locationCity: locationCity,
-              locationState: locationState
-            }
+        
+        // Check if we're running remotely (based on environment)
+        const isRemoteEnvironment = process.env.NODE_ENV === 'production' || process.env.IS_CLOUD_RUN === 'true';
+        const uploadOptions = {
+          folder: '/locations/',
+          tags: ['location', locationType, locationCity, locationState].filter(Boolean),
+          useUniqueFileName: true,
+          isPrivateFile: false,
+          metadata: {
+            locationId: location.id,
+            locationName: locationName,
+            locationType: locationType,
+            locationCity: locationCity,
+            locationState: locationState
           }
-        );
+        };
+        
+        let imagekitResponse;
+        
+        if (isRemoteEnvironment) {
+          // In remote environment, convert to base64 first to avoid stream issues
+          logger.info('Running in remote environment, using base64 upload to avoid stream issues');
+          const base64Data = imageBuffer.toString('base64');
+          logger.info(`Converted image buffer to base64 string (${base64Data.length} characters)`);
+          imagekitResponse = await imagekitClient.uploadImageFromBase64(
+            base64Data,
+            `location_${location.id}`,
+            uploadOptions
+          );
+        } else {
+          // In local environment, use buffer directly
+          imagekitResponse = await imagekitClient.uploadImage(
+            imageBuffer,
+            `location_${location.id}`,
+            uploadOptions
+          );
+        }
         
         if (imagekitResponse && imagekitResponse.url) {
           imagekitUrl = imagekitResponse.url;
