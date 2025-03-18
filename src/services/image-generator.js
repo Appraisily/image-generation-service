@@ -22,7 +22,7 @@ try {
 }
 
 // GPT-4o API configuration
-let GPT_API_KEY = process.env.OPEN_AI_API_SEO;
+let GPT_API_KEY = process.env.OPEN_AI_API_SEO || process.env.OPENAI_API_KEY;
 const GPT_API_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
 // Attempt to log if we have API keys configured (without exposing the actual keys)
@@ -61,8 +61,14 @@ async function getSecret(secretName) {
 (async () => {
   if (!GPT_API_KEY) {
     logger.info('OpenAI API Key not found in environment, checking Secret Manager...');
-    GPT_API_KEY = await getSecret('OPEN_AI_API_SEO');
+    // Try both possible secret names
+    GPT_API_KEY = await getSecret('OPENAI_API_KEY') || await getSecret('OPEN_AI_API_SEO');
     logger.info(`OpenAI API Key from Secret Manager: ${GPT_API_KEY ? 'Retrieved' : 'Not found'}`);
+    
+    if (!GPT_API_KEY) {
+      logger.warn('Could not find OpenAI API key under either OPENAI_API_KEY or OPEN_AI_API_SEO');
+      logger.info('Please ensure the correct secret name is set in Secret Manager');
+    }
   }
 })();
 
@@ -233,10 +239,11 @@ const imageGenerator = {
   async createPromptWithGPT(appraiser) {
     try {
       if (!GPT_API_KEY) {
-        GPT_API_KEY = await getSecret('OPEN_AI_API_SEO');
+        // Try both possible secret names
+        GPT_API_KEY = await getSecret('OPENAI_API_KEY') || await getSecret('OPEN_AI_API_SEO');
         
         if (!GPT_API_KEY) {
-          throw new Error('OpenAI API Key not available');
+          throw new Error('OpenAI API Key not available - checked both OPENAI_API_KEY and OPEN_AI_API_SEO secrets');
         }
       }
       
