@@ -86,13 +86,18 @@ const imageUploader = {
       // Preprocess data if it's a stream
       let processedData = data;
       if (data && typeof data === 'object' && typeof data.pipe === 'function') {
-        logger.warn('Detected stream data - streams are not directly supported for uploads');
-        logger.info('Attempting to read stream into a buffer...');
+        logger.warn('Detected stream data - attempting to read it into a buffer');
+        logger.info('Processing stream data...');
         
         try {
           // Create a function to read a stream into a buffer
           const streamToBuffer = (stream) => {
             return new Promise((resolve, reject) => {
+              // Check if the stream is readable before attaching listeners
+              if (!stream.readable) {
+                return reject(new Error('stream is not readable'));
+              }
+              
               const chunks = [];
               stream.on('data', (chunk) => chunks.push(chunk));
               stream.on('end', () => resolve(Buffer.concat(chunks)));
@@ -103,7 +108,7 @@ const imageUploader = {
                 reject(new Error('Timeout while reading stream'));
               }, 10000); // 10 second timeout
               
-              // Clear timeout on success
+              // Clear timeout on success or error
               stream.on('end', () => clearTimeout(timeout));
               stream.on('error', () => clearTimeout(timeout));
             });
@@ -112,6 +117,11 @@ const imageUploader = {
           // Try to read the stream
           processedData = await streamToBuffer(data);
           logger.info(`Successfully read stream into buffer: ${processedData.length} bytes`);
+          // If source is 'stream', change it to 'buffer' for further processing
+          if (source.toLowerCase() === 'stream') {
+            processedSource = 'buffer';
+            logger.info('Changed source type from stream to buffer for processing');
+          }
         } catch (streamError) {
           logger.error(`Failed to read stream: ${streamError.message}`);
           throw new Error(`Stream data cannot be processed: ${streamError.message}. Please convert to buffer or base64 before uploading.`);

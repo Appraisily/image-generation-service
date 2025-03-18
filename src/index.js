@@ -687,25 +687,47 @@ app.post('/api/upload', async (req, res) => {
     
     logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}`);
     
-    // Handle stream data by converting to base64
+    // Handle stream data by converting to buffer
     let processedData = data;
     let processedSource = source;
     
     if (isStream) {
-      logger.info(`Detected stream data. Converting to base64 before uploading...`);
+      logger.info(`Detected stream data. Attempting to convert to buffer before uploading...`);
       try {
-        // For streams, we need to convert to base64
-        // But since this is challenging to do with the current API,
-        // we'll reject it with a helpful message
-        return res.status(400).json({
-          error: 'Stream data is not supported directly',
-          help: 'Please convert the stream to base64 string before uploading, or use a URL source type instead'
-        });
+        // Create a function to read a stream into a buffer
+        const streamToBuffer = (stream) => {
+          return new Promise((resolve, reject) => {
+            // Check if the stream is readable before attaching listeners
+            if (!stream.readable) {
+              return reject(new Error('stream is not readable'));
+            }
+            
+            const chunks = [];
+            
+            stream.on('data', (chunk) => chunks.push(chunk));
+            stream.on('end', () => resolve(Buffer.concat(chunks)));
+            stream.on('error', (err) => reject(err));
+            
+            // Set a timeout to prevent hanging
+            const timeout = setTimeout(() => {
+              reject(new Error('Timeout while reading stream'));
+            }, 10000); // 10 second timeout
+            
+            // Clear timeout on success or error
+            stream.on('end', () => clearTimeout(timeout));
+            stream.on('error', () => clearTimeout(timeout));
+          });
+        };
+        
+        // Try to convert the stream to a buffer
+        processedData = await streamToBuffer(data);
+        processedSource = 'buffer'; // Change the source type to buffer
+        logger.info(`Successfully converted stream to buffer: ${processedData.length} bytes`);
       } catch (streamError) {
         logger.error(`Error processing stream data: ${streamError.message}`);
         return res.status(500).json({
-          error: 'Failed to process stream data',
-          help: 'Please convert the stream to base64 string before uploading'
+          error: `Failed to process stream data: ${streamError.message}`,
+          help: 'Please convert the stream to buffer or base64 string before uploading'
         });
       }
     }

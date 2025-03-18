@@ -14,6 +14,50 @@ const SERVICE_URL = process.env.SERVICE_URL || 'http://localhost:3000';
 // Test image URL - replace with an actual image URL if needed
 const TEST_IMAGE_URL = 'https://picsum.photos/800/600';
 
+// Add a test for streaming upload
+async function testStreamUpload() {
+  try {
+    console.log('\n--- Testing Stream Upload ---');
+    
+    // We need to convert the stream to buffer first locally before sending
+    // This avoids circular reference issues when streaming through multiple HTTP requests
+    const response = await axios.get(TEST_IMAGE_URL, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data);
+    console.log(`Downloaded test image, size: ${buffer.length} bytes`);
+    
+    // Create a readable stream from the buffer for testing
+    const { Readable } = require('stream');
+    const stream = new Readable();
+    stream.push(buffer);
+    stream.push(null); // Indicates end of stream
+    
+    const payload = {
+      source: 'buffer', // We'll let our fixed code handle the stream-to-buffer conversion
+      data: stream,
+      fileName: 'test-stream-upload',
+      folder: 'test-uploads',
+      tags: ['test', 'stream-upload']
+    };
+    
+    console.log(`Sending request to ${SERVICE_URL}/api/upload`);
+    console.log('Payload: [stream data]');
+    
+    const uploadResponse = await axios.post(`${SERVICE_URL}/api/upload`, payload);
+    
+    console.log('Response:', JSON.stringify(uploadResponse.data, null, 2));
+    console.log('Stream Upload Test: SUCCESS ✅');
+    return uploadResponse.data;
+  } catch (error) {
+    console.error('Stream Upload Test: FAILED ❌');
+    if (error.response) {
+      console.error('Response:', error.response.status, JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error('Error:', error.message);
+    }
+    return null;
+  }
+}
+
 // A function to read an image file and convert to base64
 async function getBase64FromFile(filePath) {
   try {
@@ -127,10 +171,14 @@ async function runTests() {
   // Run base64 upload test
   const base64Result = await testBase64Upload();
   
+  // Run stream upload test (our new test)
+  const streamResult = await testStreamUpload();
+  
   // Summary
   console.log('\n--- Test Summary ---');
   console.log(`URL Upload: ${urlResult ? 'SUCCESS ✅' : 'FAILED ❌'}`);
   console.log(`Base64 Upload: ${base64Result ? 'SUCCESS ✅' : 'FAILED ❌'}`);
+  console.log(`Stream Upload: ${streamResult ? 'SUCCESS ✅' : 'FAILED ❌'}`);
   
   // Clean up test file
   try {
