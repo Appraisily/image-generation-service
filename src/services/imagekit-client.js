@@ -264,23 +264,49 @@ const uploadImageFromBase64 = async (base64Data, fileName, options = {}) => {
     
     logger.debug(`Base64 data type: ${typeof base64Data}, length: ${base64Data.length}`);
 
-    // If base64 string includes data URI prefix, remove it
+    // If base64 string includes data URI prefix, process it properly
     let imageData = base64Data;
+    let mimeType = null;
+    
     if (base64Data.startsWith('data:')) {
       logger.debug('Base64 data contains data URI prefix, attempting to extract content');
+      // First look for the standard format with mime type
       const matches = base64Data.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+      
       if (matches && matches.length === 3) {
-        const mimeType = matches[1];
+        mimeType = matches[1];
         imageData = matches[2];
-        logger.debug(`Data URI prefix removed. MIME type: ${mimeType}, data length: ${imageData.length}`);
+        logger.debug(`Data URI prefix parsed. MIME type: ${mimeType}, data length: ${imageData.length}`);
       } else {
-        logger.warn('Failed to parse data URI prefix properly, using raw input');
+        // Try an alternative format without mime type
+        const simpleMatches = base64Data.match(/^data:base64,(.+)$/);
+        if (simpleMatches && simpleMatches.length === 2) {
+          imageData = simpleMatches[1];
+          logger.debug(`Simple data URI prefix removed. Data length: ${imageData.length}`);
+        } else {
+          logger.warn('Failed to parse data URI prefix, attempting to use raw input');
+          // We'll still try to process it, but log a warning
+        }
       }
     }
     
-    // Basic validation of base64 characters
-    if (!/^[A-Za-z0-9+/=]+$/.test(imageData)) {
-      logger.warn('Base64 data contains invalid characters');
+    // Basic validation and cleaning of base64 characters
+    const validBase64Regex = /^[A-Za-z0-9+/=]+$/;
+    if (!validBase64Regex.test(imageData.replace(/\s/g, ''))) {
+      logger.warn('Base64 data contains invalid characters, attempting to clean');
+      
+      // Remove any non-base64 characters and whitespace
+      const cleanedImageData = imageData.replace(/[^A-Za-z0-9+/=]/g, '');
+      
+      if (cleanedImageData.length < imageData.length) {
+        logger.info(`Cleaned base64 string: removed ${imageData.length - cleanedImageData.length} invalid characters`);
+        imageData = cleanedImageData;
+      }
+      
+      // Check again after cleaning
+      if (!validBase64Regex.test(imageData)) {
+        logger.warn('Base64 data still contains invalid characters after cleaning, upload may fail');
+      }
     }
     
     try {
@@ -295,9 +321,20 @@ const uploadImageFromBase64 = async (base64Data, fileName, options = {}) => {
         throw new Error('Failed to create valid buffer from base64 data');
       }
       
+      // Generate a more appropriate filename if needed
+      let finalFileName = fileName;
+      if (mimeType) {
+        // If we detected a mime type from the data URI, ensure the file extension matches
+        const fileExt = getExtensionFromMimeType(mimeType);
+        if (fileExt && !fileName.toLowerCase().endsWith(`.${fileExt.toLowerCase()}`)) {
+          finalFileName = `${fileName}.${fileExt}`;
+          logger.info(`Added file extension based on detected MIME type: ${finalFileName}`);
+        }
+      }
+      
       // Use the uploadImage function with the buffer
-      logger.debug('Proceeding to upload buffer to ImageKit');
-      return await uploadImage(imageBuffer, fileName, options);
+      logger.debug(`Proceeding to upload buffer to ImageKit with filename: ${finalFileName}`);
+      return await uploadImage(imageBuffer, finalFileName, options);
       
     } catch (bufferError) {
       logger.error(`Buffer conversion error: ${bufferError.message}`);
@@ -311,6 +348,22 @@ const uploadImageFromBase64 = async (base64Data, fileName, options = {}) => {
     throw error;
   }
 };
+
+// Helper function to determine file extension from MIME type
+function getExtensionFromMimeType(mimeType) {
+  const mimeToExt = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/svg+xml': 'svg',
+    'image/bmp': 'bmp',
+    'image/tiff': 'tiff'
+  };
+  
+  return mimeToExt[mimeType.toLowerCase()] || null;
+}
 
 module.exports = {
   uploadImage,

@@ -203,7 +203,7 @@ const imageUploader = {
 
       switch (source.toLowerCase()) {
         case 'base64':
-          // Handle base64 data upload
+          // Handle base64 data upload (enhanced version)
           logger.debug(`Sending base64 data to ImageKit. Data type: ${typeof processedData}, length: ${processedData ? (typeof processedData === 'string' ? processedData.length : 'not a string') : 0}`);
           try {
             // Ensure data is a valid base64 string
@@ -219,11 +219,35 @@ const imageUploader = {
               }
             }
             
-            // Validate base64 string format (basic check)
-            if (!/^[A-Za-z0-9+/=]+$/.test(processedData.replace(/\s/g, ''))) {
-              logger.warn('Warning: Base64 data contains invalid characters. This might not be properly encoded base64.');
+            // Check if this is a data URI and handle it properly
+            if (processedData.startsWith('data:')) {
+              logger.info('Detected base64 with data URI prefix, handling appropriately');
+              // The imagekitClient.uploadImageFromBase64 will handle the data URI correctly
+            } else {
+              // Validate base64 string format (basic check)
+              if (!/^[A-Za-z0-9+/=]+$/.test(processedData.replace(/\s/g, ''))) {
+                logger.warn('Warning: Base64 data contains invalid characters. This might not be properly encoded base64.');
+                
+                // Try to clean up the string (remove non-base64 chars)
+                try {
+                  const cleanedBase64 = processedData.replace(/[^A-Za-z0-9+/=]/g, '');
+                  if (cleanedBase64.length < processedData.length) {
+                    logger.info(`Cleaned base64 string: removed ${processedData.length - cleanedBase64.length} invalid characters`);
+                    processedData = cleanedBase64;
+                  }
+                } catch (cleanError) {
+                  logger.warn(`Failed to clean base64 string: ${cleanError.message}`);
+                  // Continue with the original string
+                }
+              }
             }
             
+            // Ensure the base64 string isn't empty after processing
+            if (!processedData || processedData.length === 0) {
+              throw new Error('Base64 data is empty after processing');
+            }
+            
+            logger.debug(`Calling uploadImageFromBase64 with data length: ${processedData.length}`);
             result = await imagekitClient.uploadImageFromBase64(processedData, fileName, uploadOptions);
           } catch (base64Error) {
             logger.error(`Base64 upload failed: ${base64Error.message}`);
