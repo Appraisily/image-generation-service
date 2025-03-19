@@ -83,81 +83,101 @@ const imageUploader = {
         ...metadata
       };
 
-      // Preprocess data if it's a stream
+      // Preprocess data if it's a stream (enhanced version)
       let processedData = data;
       if (data && typeof data === 'object' && typeof data.pipe === 'function') {
-        logger.warn('Detected stream data - attempting to read it into a buffer');
+        logger.warn('Detected stream data - attempting to handle it safely');
         logger.info('Processing stream data...');
         
         try {
-          // Create a function to read a stream into a buffer
-          const streamToBuffer = (stream) => {
-            return new Promise((resolve, reject) => {
-              // Enhanced stream validation
-              if (!stream.readable) {
-                logger.error('Stream is not in readable state');
-                // Try to recover by creating a new empty buffer
-                logger.info('Creating empty buffer as fallback');
-                return resolve(Buffer.alloc(0));
-              }
-              
-              const chunks = [];
-              
-              // Safer event attachment with error handling
-              try {
-                stream.on('data', (chunk) => chunks.push(chunk));
-                stream.on('end', () => {
-                  try {
-                    const buffer = Buffer.concat(chunks);
-                    logger.info(`Stream read complete: ${buffer.length} bytes`);
-                    resolve(buffer);
-                  } catch (concatError) {
-                    logger.error(`Error concatenating chunks: ${concatError.message}`);
-                    resolve(Buffer.alloc(0));
-                  }
-                });
-                stream.on('error', (err) => {
-                  logger.error(`Stream error: ${err.message}`);
-                  reject(err);
-                });
-              } catch (eventError) {
-                logger.error(`Error attaching stream events: ${eventError.message}`);
-                return reject(eventError);
-              }
-              
-              // Set a timeout to prevent hanging
-              const timeout = setTimeout(() => {
-                logger.error('Stream reading timed out');
-                reject(new Error('Timeout while reading stream'));
-              }, 10000); // 10 second timeout
-              
-              // Clear timeout on success or error
-              try {
-                stream.on('end', () => clearTimeout(timeout));
-                stream.on('error', () => clearTimeout(timeout));
-              } catch (error) {
-                // Ignore errors when attaching cleanup listeners
-                clearTimeout(timeout);
-              }
-            });
-          };
-          
-          // Try to read the stream
-          processedData = await streamToBuffer(data);
-          
-          // Verify we got a valid buffer
-          if (!Buffer.isBuffer(processedData) || processedData.length === 0) {
-            logger.warn('Stream produced empty or invalid buffer, checking if stream has a buffer property');
+          // First check: Is the stream already readable?
+          if (!data.readable) {
+            logger.error('Stream is not in readable state - this will cause upload failures');
             
-            // Some streams have a buffer property we can use directly
-            if (data.buffer && Buffer.isBuffer(data.buffer)) {
-              logger.info('Using stream.buffer property instead');
-              processedData = data.buffer;
+            // Try recovery paths
+            if (data._readableState && data._readableState.buffer) {
+              // Try to access internal buffer (for some stream types)
+              logger.info('Attempting to recover stream data from internal buffer');
+              const bufferObj = data._readableState.buffer;
+              
+              if (bufferObj && typeof bufferObj.slice === 'function') {
+                try {
+                  processedData = Buffer.from(bufferObj.slice());
+                  logger.info(`Recovery from internal buffer successful: ${processedData.length} bytes`);
+                } catch (bufferError) {
+                  logger.error(`Failed to recover from internal buffer: ${bufferError.message}`);
+                }
+              }
+            } else if (data.buffer && Buffer.isBuffer(data.buffer)) {
+              // Some streams have a buffer property directly accessible
+              logger.info('Using stream.buffer property for recovery');
+              processedData = data.buffer; 
+              logger.info(`Recovery from stream.buffer successful: ${processedData.length} bytes`);
             } else {
-              logger.warn('No valid buffer found in stream, upload may fail');
+              // If we can't recover the data, reject with a helpful error
+              logger.error('Stream is not readable and no recovery option available');
+              throw new Error('Stream is not in a readable state and no recovery data is available. Please provide the data as a buffer or base64 string instead.');
             }
           } else {
-            logger.info(`Successfully read stream into buffer: ${processedData.length} bytes`);
+            // Stream is readable, so we can process it normally
+            logger.info('Stream is readable, proceeding with normal processing');
+            
+            // Create a function to read a stream into a buffer
+            const streamToBuffer = (stream) => {
+              return new Promise((resolve, reject) => {
+                const chunks = [];
+                
+                // Safer event attachment with error handling
+                try {
+                  stream.on('data', (chunk) => chunks.push(chunk));
+                  stream.on('end', () => {
+                    try {
+                      const buffer = Buffer.concat(chunks);
+                      logger.info(`Stream read complete: ${buffer.length} bytes`);
+                      resolve(buffer);
+                    } catch (concatError) {
+                      logger.error(`Error concatenating chunks: ${concatError.message}`);
+                      resolve(Buffer.alloc(0));
+                    }
+                  });
+                  stream.on('error', (err) => {
+                    logger.error(`Stream error: ${err.message}`);
+                    reject(err);
+                  });
+                  
+                  // Set a timeout to prevent hanging
+                  const timeout = setTimeout(() => {
+                    logger.error('Stream reading timed out');
+                    reject(new Error('Timeout while reading stream'));
+                  }, 10000); // 10 second timeout
+                  
+                  // Clear timeout on success or error
+                  stream.on('end', () => clearTimeout(timeout));
+                  stream.on('error', () => clearTimeout(timeout));
+                } catch (eventError) {
+                  logger.error(`Error attaching stream events: ${eventError.message}`);
+                  return reject(eventError);
+                }
+              });
+            };
+            
+            // Try to read the stream
+            processedData = await streamToBuffer(data);
+            
+            // Verify we got a valid buffer
+            if (!Buffer.isBuffer(processedData) || processedData.length === 0) {
+              logger.warn('Stream produced empty or invalid buffer, checking if stream has a buffer property');
+              
+              // Some streams have a buffer property we can use directly
+              if (data.buffer && Buffer.isBuffer(data.buffer)) {
+                logger.info('Using stream.buffer property instead');
+                processedData = data.buffer;
+              } else {
+                logger.warn('No valid buffer found in stream, upload may fail');
+              }
+            } else {
+              logger.info(`Successfully read stream into buffer: ${processedData.length} bytes`);
+            }
           }
           
           // If source is 'stream', change it to 'buffer' for further processing
@@ -166,7 +186,7 @@ const imageUploader = {
             logger.info('Changed source type from stream to buffer for processing');
           }
         } catch (streamError) {
-          logger.error(`Failed to read stream: ${streamError.message}`);
+          logger.error(`Failed to process stream: ${streamError.message}`);
           
           // Try to recover - check if the stream has a direct buffer property we can use
           if (data.buffer && Buffer.isBuffer(data.buffer)) {

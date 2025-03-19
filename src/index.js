@@ -682,13 +682,16 @@ app.post('/api/upload', async (req, res) => {
     
     // Enhanced debug information about the data being received
     const dataType = typeof data;
-    const isBuffer = Buffer.isBuffer(data);
+    let isBuffer = Buffer.isBuffer(data);
     const isStream = data && typeof data === 'object' && typeof data.pipe === 'function';
     
-    logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}, Length: ${isBuffer ? data.length : 'unknown'}, HasToJSON: ${data && typeof data.toJSON === 'function'}`);
+    logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}, Length: ${isBuffer ? data.length : (typeof data === 'string' ? data.length : 'unknown')}, HasToJSON: ${data && typeof data.toJSON === 'function'}`);
     
     // For JSON endpoints, Buffers are automatically serialized to objects with type: "Buffer", data: [...]
     // In such cases, we need to convert back to a real Buffer
+    let processedData = data;
+    let processedSource = source;
+    
     if (dataType === 'object' && !isBuffer && !isStream && data?.type === 'Buffer' && Array.isArray(data.data)) {
       logger.info('Detected serialized Buffer object, converting back to Buffer');
       try {
@@ -700,10 +703,6 @@ app.post('/api/upload', async (req, res) => {
       }
     }
   
-    // Handle data processing based on what we received
-    let processedData = data;
-    let processedSource = source;
-    
     // CASE 1: Handle stream data
     if (isStream) {
       logger.info(`Detected stream data. Attempting to convert to buffer before uploading...`);
@@ -723,18 +722,29 @@ app.post('/api/upload', async (req, res) => {
       }
     }
     
-    // If we receive a buffer for a base64 source, convert it to base64 string
-    if (source.toLowerCase() === 'base64' && isBuffer) {
-      logger.info(`Converting buffer to base64 string for base64 source type`);
-      processedData = data.toString('base64');
+    // CASE 2: Handle base64 encoded string with data URI prefix
+    if (source.toLowerCase() === 'base64' && typeof processedData === 'string' && processedData.startsWith('data:')) {
+      logger.info('Detected base64 string with data URI prefix');
+      // No need to modify - imageUploader service will handle this format
     }
     
-    // If we receive an object that's not a buffer for base64 source, try to handle it
+    // CASE 3: If we receive a buffer for a base64 source, convert it to base64 string
+    if (source.toLowerCase() === 'base64' && isBuffer) {
+      logger.info(`Converting buffer to base64 string for base64 source type`);
+      processedData = processedData.toString('base64');
+    }
+    
+    // CASE 4: If we receive an object that's not a buffer for base64 source, try to handle it
     if (source.toLowerCase() === 'base64' && dataType === 'object' && !isBuffer && !isStream) {
       logger.warn(`Received object for base64 source that is not a buffer. Attempting to stringify...`);
       try {
-        processedData = JSON.stringify(data);
-        logger.warn(`Converted object to string, but this may not be valid base64`);
+        if (typeof processedData.toString === 'function') {
+          processedData = processedData.toString();
+          logger.info('Converted object to string using toString()');
+        } else {
+          processedData = JSON.stringify(processedData);
+          logger.warn(`Converted object to string using JSON.stringify, but this may not be valid base64`);
+        }
       } catch (jsonError) {
         logger.error(`Failed to stringify object: ${jsonError.message}`);
         return res.status(400).json({
