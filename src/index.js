@@ -687,42 +687,33 @@ app.post('/api/upload', async (req, res) => {
     
     logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}, Length: ${isBuffer ? data.length : 'unknown'}, HasToJSON: ${data && typeof data.toJSON === 'function'}`);
     
-    // Handle stream data by converting to buffer
+    // For JSON endpoints, Buffers are automatically serialized to objects with type: "Buffer", data: [...]
+    // In such cases, we need to convert back to a real Buffer
+    if (dataType === 'object' && !isBuffer && !isStream && data?.type === 'Buffer' && Array.isArray(data.data)) {
+      logger.info('Detected serialized Buffer object, converting back to Buffer');
+      try {
+        processedData = Buffer.from(data.data);
+        logger.info(`Successfully converted serialized Buffer to real Buffer: ${processedData.length} bytes`);
+        isBuffer = true; // Update the flag since we now have a buffer
+      } catch (bufferError) {
+        logger.error(`Failed to convert serialized Buffer: ${bufferError.message}`);
+      }
+    }
+  
+    // Handle data processing based on what we received
     let processedData = data;
     let processedSource = source;
     
+    // CASE 1: Handle stream data
     if (isStream) {
       logger.info(`Detected stream data. Attempting to convert to buffer before uploading...`);
       try {
-        // Create a function to read a stream into a buffer
-        const streamToBuffer = (stream) => {
-          return new Promise((resolve, reject) => {
-            // Check if the stream is readable before attaching listeners
-            if (!stream.readable) {
-              return reject(new Error('stream is not readable'));
-            }
-            
-            const chunks = [];
-            
-            stream.on('data', (chunk) => chunks.push(chunk));
-            stream.on('end', () => resolve(Buffer.concat(chunks)));
-            stream.on('error', (err) => reject(err));
-            
-            // Set a timeout to prevent hanging
-            const timeout = setTimeout(() => {
-              reject(new Error('Timeout while reading stream'));
-            }, 10000); // 10 second timeout
-            
-            // Clear timeout on success or error
-            stream.on('end', () => clearTimeout(timeout));
-            stream.on('error', () => clearTimeout(timeout));
-          });
-        };
-        
-        // Try to convert the stream to a buffer
-        processedData = await streamToBuffer(data);
-        processedSource = 'buffer'; // Change the source type to buffer
-        logger.info(`Successfully converted stream to buffer: ${processedData.length} bytes`);
+        // In most JSON APIs, streams won't actually be sent correctly
+        // Just reject with a better error message that points to the solution
+        return res.status(400).json({
+          error: 'Stream data cannot be processed directly in JSON API',
+          help: 'To upload a stream, convert it to a buffer or base64 string on the client side before sending'
+        });
       } catch (streamError) {
         logger.error(`Error processing stream data: ${streamError.message}`);
         return res.status(500).json({

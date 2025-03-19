@@ -1,14 +1,47 @@
-# Image Generation Service API Documentation
+# Image Generation Service
 
-This service provides an API for generating AI-powered images for art appraisers. It uses advanced AI models to create professional profile images based on appraiser information.
+A robust service for generating and managing AI-powered images for art appraisers and locations. This service leverages advanced AI models to create professional profile images while providing storage and CDN delivery through ImageKit.
 
-## Base URL
+## Features
+
+- **AI-Powered Image Generation**: Create professional profile images for art appraisers and locations using advanced AI models
+- **Multiple Generation Options**: Generate images for individual appraisers, locations, or in bulk
+- **Custom Prompts**: Override automatic prompt generation with your own custom prompts
+- **Image Uploads**: Upload images from URLs, base64 data, or buffers
+- **Reliable Error Handling**: Detailed error messages with suggestions for resolution
+- **Scalable Architecture**: Designed to handle large volumes of requests
+- **Google Cloud Integration**: Securely manages credentials using Secret Manager
+- **Robust Logging**: Comprehensive logging for troubleshooting
+- **Caching System**: Efficient image caching to avoid unnecessary regeneration
+- **Fault Tolerance**: Graceful handling of API disruptions and connectivity issues
+
+## Architecture
+
+The service is built with a modular architecture:
+
+```
+┌─────────────────┐     ┌────────────────┐     ┌───────────────┐
+│  API Endpoints  │────▶│ Image Generator│────▶│  Black Forest │
+└─────────────────┘     └────────────────┘     │  AI Service   │
+        │                       │              └───────────────┘
+        │                       ▼
+        │               ┌────────────────┐
+        │               │  Image Cache   │
+        │               └────────────────┘
+        │                       │
+        ▼                       ▼
+┌─────────────────┐     ┌────────────────┐     ┌───────────────┐
+│  Image Uploader │────▶│ ImageKit CDN   │◀───▶│   End Users   │
+└─────────────────┘     └────────────────┘     └───────────────┘
+```
+
+## API Endpoints
+
+### Base URL
 
 ```
 https://image-generation-service-856401495068.us-central1.run.app
 ```
-
-## API Endpoints
 
 ### 1. Generate Image for Single Appraiser
 `POST /api/generate`
@@ -94,13 +127,13 @@ Generate images for multiple appraisers in a single request.
 ### 4. Upload Image
 `POST /api/upload`
 
-Upload an image from a URL or base64 data to ImageKit.
+Upload an image from a URL, base64 data, or buffer to ImageKit.
 
 #### Request Body
 ```json
 {
-  "source": "url",                            // Required - either "url" or "base64"
-  "data": "https://example.com/image.jpg",    // Required - URL or base64 string
+  "source": "url",                            // Required - either "url", "base64", or "buffer"
+  "data": "https://example.com/image.jpg",    // Required - URL, base64 string, or buffer data
   "fileName": "custom-file-name",             // Optional - defaults to timestamp-based name
   "folder": "custom/folder/path",             // Optional - defaults to "uploaded-images"
   "tags": ["tag1", "tag2"],                   // Optional - tags for the image
@@ -109,6 +142,11 @@ Upload an image from a URL or base64 data to ImageKit.
   }
 }
 ```
+
+#### Important Notes for Upload
+- When using `source: "buffer"`, the `data` must be a Buffer or base64 string representation of the buffer
+- Do not attempt to send a stream directly through the API - convert streams to buffers on the client side first
+- For large images, consider using the URL source type rather than base64 or buffer
 
 #### Response
 ```json
@@ -191,6 +229,98 @@ Generated images are stored and served through ImageKit CDN for optimal delivery
 4. Implement proper error handling in your client code
 5. Cache the returned image URLs on your end when possible
 6. For custom images, use the `/api/upload` endpoint to directly upload images to ImageKit
+7. When uploading streams, convert them to buffers or base64 first on the client side
+8. Use appropriate source types for data: "url" for URLs, "base64" for base64 strings, "buffer" for binary data
+9. Implement request timeouts and retry logic in your client applications
+10. Monitor response times and implement circuit breakers for high-traffic applications
+
+## Recent Improvements
+
+### Stream Handling Improvements
+- Fixed "stream is not readable" errors when uploading images
+- Added validation for stream readability before attempting to read from streams
+- Added better error recovery when streams are in an invalid state
+- Enhanced stream-to-buffer conversion with proper timeouts and cleanup
+- Added detailed logging for stream processing to aid in debugging
+
+### API Robustness
+- Improved JSON parsing with better error messages for invalid input
+- Enhanced validation for image upload sources and data formats
+- Added better fallback mechanisms for various data input types
+- Improved error propagation and user-friendly error responses
+
+### Performance Optimizations
+- Implemented multi-level caching system to reduce generation costs and improve response times
+- Optimized buffer handling for large images to reduce memory usage
+- Added connection pooling for external API calls
+- Improved concurrent request handling
+
+### Deployment & Infrastructure
+- Enhanced Docker configuration for better resource utilization
+- Implemented health check endpoints with detailed status reporting
+- Added automated scaling based on request volume
+- Improved CI/CD pipeline for faster deployments
+
+## Installation & Deployment
+
+### Local Development
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/image-generation-service.git
+   cd image-generation-service
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Set up environment variables by creating a `.env` file:
+   ```
+   PORT=3000
+   NODE_ENV=development
+   IMAGEKIT_PUBLIC_KEY=your_public_key
+   IMAGEKIT_PRIVATE_KEY=your_private_key
+   IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/your_endpoint
+   ```
+
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+### Production Deployment
+
+The service is designed to run on Google Cloud Run. See `DEPLOYMENT.md` for detailed deployment instructions.
+
+## Error Handling
+
+The service implements comprehensive error handling:
+
+1. **Validation Errors**: Returns 400 with specific feedback on required fields
+2. **Payment Issues**: Returns 402 when AI generation service requires payment
+3. **Stream Processing**: Properly handles stream data with validation and timeout prevention
+4. **Malformed JSON**: Provides helpful feedback for improperly formatted JSON requests
+5. **Service Errors**: Logs detailed error information while returning user-friendly messages
+
+## Debugging & Testing
+
+Several test scripts are available to validate functionality:
+
+```bash
+# Test image generation
+node test-generation.js
+
+# Test image upload functionality
+node test-upload.js
+
+# Test API endpoints
+node test-api-debug.js
+
+# Test bulk image generation
+node test-bulk.js
+```
 
 ## Support
 
