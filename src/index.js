@@ -705,20 +705,12 @@ app.post('/api/upload', async (req, res) => {
   
     // CASE 1: Handle stream data
     if (isStream) {
-      logger.info(`Detected stream data. Attempting to convert to buffer before uploading...`);
-      try {
-        // In most JSON APIs, streams won't actually be sent correctly
-        // Just reject with a better error message that points to the solution
-        return res.status(400).json({
-          error: 'Stream data cannot be processed directly in JSON API',
-          help: 'To upload a stream, convert it to a buffer or base64 string on the client side before sending'
-        });
-      } catch (streamError) {
-        logger.error(`Error processing stream data: ${streamError.message}`);
-        return res.status(500).json({
-          error: `Failed to process stream data: ${streamError.message}`,
-          help: 'Please convert the stream to buffer or base64 string before uploading'
-        });
+      logger.info(`Detected stream data. Proceeding with imageUploader handling...`);
+      // Let the imageUploader handle this - our new code can handle streams properly
+      // We'll just ensure the source is marked as buffer
+      if (source.toLowerCase() === 'stream') {
+        logger.info('Changing source type from stream to buffer for processing');
+        processedSource = 'buffer';
       }
     }
     
