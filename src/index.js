@@ -11,6 +11,7 @@ const path = require('path');
 const imageGenerator = require('./services/image-generator');
 const imageUploader = require('./services/image-uploader');
 const { logger } = require('./utils/logger');
+const Busboy = require('busboy');
 
 // Initialize Express app
 const app = express();
@@ -769,6 +770,121 @@ app.post('/api/upload', async (req, res) => {
   } catch (error) {
     logger.error(`API error in upload endpoint: ${error.message}`);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// Add a new upload endpoint that uses busboy for multipart/form-data
+app.post('/api/upload-multipart', async (req, res) => {
+  logger.info('Received multipart upload request');
+  let uploadFile = null;
+  let fileName = '';
+  let folder = 'uploaded-images';
+  let tags = [];
+  let metadata = {};
+  
+  try {
+    if (!req.headers['content-type'] || !req.headers['content-type'].includes('multipart/form-data')) {
+      return res.status(400).json({
+        error: 'Invalid Content-Type',
+        message: 'This endpoint requires multipart/form-data'
+      });
+    }
+    
+    const busboy = Busboy({ headers: req.headers });
+    
+    // Set up file handler
+    busboy.on('file', (fieldname, file, info) => {
+      const { filename, encoding, mimeType } = info;
+      logger.info(`Processing file: ${filename}, type: ${mimeType}, encoding: ${encoding}`);
+      
+      // Store file data in memory
+      const chunks = [];
+      file.on('data', (chunk) => {
+        chunks.push(chunk);
+      });
+      
+      file.on('end', () => {
+        uploadFile = Buffer.concat(chunks);
+        fileName = filename || `upload_${Date.now()}`;
+        logger.info(`File received: ${fileName}, size: ${uploadFile.length} bytes`);
+      });
+    });
+    
+    // Handle form fields
+    busboy.on('field', (fieldname, val) => {
+      logger.info(`Field: ${fieldname} = ${val}`);
+      
+      if (fieldname === 'folder') {
+        folder = val;
+      } else if (fieldname === 'tags') {
+        try {
+          tags = JSON.parse(val);
+        } catch (e) {
+          logger.warn(`Could not parse tags as JSON: ${e.message}`);
+          tags = [val];
+        }
+      } else if (fieldname === 'metadata') {
+        try {
+          metadata = JSON.parse(val);
+        } catch (e) {
+          logger.warn(`Could not parse metadata as JSON: ${e.message}`);
+        }
+      } else if (fieldname === 'fileName') {
+        fileName = val;
+      }
+    });
+    
+    // Handle completion
+    busboy.on('finish', async () => {
+      logger.info('Busboy processing finished');
+      
+      if (!uploadFile) {
+        return res.status(400).json({
+          error: 'No file data received'
+        });
+      }
+      
+      try {
+        // Use imagekit client directly to upload the buffer
+        const uploadOptions = {
+          file: uploadFile,
+          fileName: fileName,
+          folder: folder,
+          useUniqueFileName: true,
+          tags: tags,
+          metadata: metadata
+        };
+        
+        logger.info(`Uploading file to ImageKit: ${fileName}`);
+        const result = await imageUploader.uploadImage(uploadOptions);
+        
+        return res.status(200).json({
+          success: true,
+          data: result
+        });
+      } catch (uploadError) {
+        logger.error(`Error uploading file: ${uploadError.message}`);
+        return res.status(500).json({
+          error: `Upload failed: ${uploadError.message}`
+        });
+      }
+    });
+    
+    // Handle busboy errors
+    busboy.on('error', (error) => {
+      logger.error(`Busboy error: ${error.message}`);
+      return res.status(500).json({
+        error: `File processing error: ${error.message}`
+      });
+    });
+    
+    // Pipe the request to busboy for processing
+    req.pipe(busboy);
+  } catch (error) {
+    logger.error(`Error in multipart upload: ${error.message}`);
+    return res.status(500).json({
+      error: `Server error: ${error.message}`
+    });
   }
 });
 
