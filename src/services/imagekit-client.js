@@ -254,97 +254,144 @@ const uploadImageFromUrl = async (imageUrl, fileName = null, options = {}) => {
  */
 const uploadImageFromBase64 = async (base64Data, fileName, options = {}) => {
   try {
-    logger.debug(`Processing base64 upload for fileName: ${fileName}`);
+    const client = await ensureImageKitClient();
     
-    // Validate input
+    // Generate a filename if not provided
+    if (!fileName) {
+      fileName = `image_${Date.now()}.jpg`;
+    }
+    
+    // Validate base64 data
     if (!base64Data) {
-      logger.error('Base64 data is empty or undefined');
-      throw new Error('Base64 data cannot be empty');
+      logger.error('Base64 data is null or undefined');
+      throw new Error('Base64 data cannot be null or undefined');
     }
     
-    logger.debug(`Base64 data type: ${typeof base64Data}, length: ${base64Data.length}`);
-
-    // If base64 string includes data URI prefix, process it properly
-    let imageData = base64Data;
-    let mimeType = null;
-    
-    if (base64Data.startsWith('data:')) {
-      logger.debug('Base64 data contains data URI prefix, attempting to extract content');
-      // First look for the standard format with mime type
-      const matches = base64Data.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+    if (typeof base64Data !== 'string') {
+      logger.error(`Invalid base64 data: expected string but got ${typeof base64Data}`);
       
-      if (matches && matches.length === 3) {
-        mimeType = matches[1];
-        imageData = matches[2];
-        logger.debug(`Data URI prefix parsed. MIME type: ${mimeType}, data length: ${imageData.length}`);
-      } else {
-        // Try an alternative format without mime type
-        const simpleMatches = base64Data.match(/^data:base64,(.+)$/);
-        if (simpleMatches && simpleMatches.length === 2) {
-          imageData = simpleMatches[1];
-          logger.debug(`Simple data URI prefix removed. Data length: ${imageData.length}`);
+      // Try to convert non-string data to string
+      try {
+        if (Buffer.isBuffer(base64Data)) {
+          // Convert Buffer to base64 string
+          base64Data = base64Data.toString('base64');
+          logger.info(`Converted Buffer to base64 string (${base64Data.length} chars)`);
+        } else if (typeof base64Data === 'object' && base64Data !== null) {
+          // Try to stringify object
+          base64Data = JSON.stringify(base64Data);
+          logger.warn(`Converted object to string using JSON.stringify (${base64Data.length} chars)`);
         } else {
-          logger.warn('Failed to parse data URI prefix, attempting to use raw input');
-          // We'll still try to process it, but log a warning
+          // For other types, try toString()
+          base64Data = String(base64Data);
+          logger.warn(`Converted ${typeof base64Data} to string using String() (${base64Data.length} chars)`);
         }
+      } catch (conversionError) {
+        logger.error(`Failed to convert data to string: ${conversionError.message}`);
+        throw new Error(`Expected base64 string but got ${typeof base64Data}`);
       }
     }
     
-    // Basic validation and cleaning of base64 characters
-    const validBase64Regex = /^[A-Za-z0-9+/=]+$/;
-    if (!validBase64Regex.test(imageData.replace(/\s/g, ''))) {
-      logger.warn('Base64 data contains invalid characters, attempting to clean');
+    // Handle case where options is a string (backward compatibility)
+    const folder = typeof options === 'string' ? options : (options.folder || 'appraiser-images');
+    
+    logger.info(`Uploading base64 image to ImageKit: ${fileName} in folder: ${folder}`);
+    
+    // Check if data URI prefix is present and add it if missing
+    if (!base64Data.startsWith('data:')) {
+      // Try to detect image type from the base64 data
+      let mimeType = 'image/jpeg'; // Default
       
-      // Remove any non-base64 characters and whitespace
-      const cleanedImageData = imageData.replace(/[^A-Za-z0-9+/=]/g, '');
-      
-      if (cleanedImageData.length < imageData.length) {
-        logger.info(`Cleaned base64 string: removed ${imageData.length - cleanedImageData.length} invalid characters`);
-        imageData = cleanedImageData;
+      try {
+        // Check for known image signatures in base64
+        if (base64Data.startsWith('/9j/')) {
+          mimeType = 'image/jpeg';
+        } else if (base64Data.startsWith('iVBORw0')) {
+          mimeType = 'image/png';
+        } else if (base64Data.startsWith('R0lGOD')) {
+          mimeType = 'image/gif';
+        } else if (base64Data.startsWith('UklGR')) {
+          mimeType = 'image/webp';
+        }
+        
+        logger.info(`Determined MIME type from base64 header: ${mimeType}`);
+        base64Data = `data:${mimeType};base64,${base64Data}`;
+      } catch (error) {
+        logger.warn(`Error detecting MIME type: ${error.message}`);
+        // Default to JPEG if detection fails
+        base64Data = `data:image/jpeg;base64,${base64Data}`;
       }
       
-      // Check again after cleaning
-      if (!validBase64Regex.test(imageData)) {
-        logger.warn('Base64 data still contains invalid characters after cleaning, upload may fail');
-      }
+      logger.info('Added data URI prefix to base64 string');
     }
     
+    // Create upload options, merging any provided options
+    const uploadOptions = {
+      file: base64Data,
+      fileName: fileName,
+      folder: folder,
+      useUniqueFileName: true,
+      ...(typeof options === 'object' ? options : {})
+    };
+    
+    // Remove folder from uploadOptions if it was added above to avoid duplication
+    if (typeof options === 'object' && options.folder) {
+      delete uploadOptions.folder;
+      uploadOptions.folder = folder;
+    }
+    
+    // Log information about the data we're sending
+    logger.debug(`Prepared upload options: ${JSON.stringify({
+      ...uploadOptions,
+      file: `<Base64 string of ${base64Data.length} chars>`
+    })}`);
+    
+    // Make the upload request
     try {
-      // Convert base64 to buffer
-      logger.debug('Converting base64 to buffer...');
-      const imageBuffer = Buffer.from(imageData, 'base64');
-      logger.debug(`Buffer created successfully. Size: ${imageBuffer.length} bytes`);
+      const response = await client.upload(uploadOptions);
       
-      // Check if buffer is valid
-      if (imageBuffer.length === 0) {
-        logger.error('Generated buffer is empty');
-        throw new Error('Failed to create valid buffer from base64 data');
+      if (!response || !response.url) {
+        throw new Error('Failed to get URL from ImageKit upload response');
       }
       
-      // Generate a more appropriate filename if needed
-      let finalFileName = fileName;
-      if (mimeType) {
-        // If we detected a mime type from the data URI, ensure the file extension matches
-        const fileExt = getExtensionFromMimeType(mimeType);
-        if (fileExt && !fileName.toLowerCase().endsWith(`.${fileExt.toLowerCase()}`)) {
-          finalFileName = `${fileName}.${fileExt}`;
-          logger.info(`Added file extension based on detected MIME type: ${finalFileName}`);
+      logger.info(`Successfully uploaded image to ImageKit: ${response.url}`);
+      return {
+        url: response.url,
+        fileId: response.fileId,
+        name: response.name,
+        size: response.size
+      };
+    } catch (uploadError) {
+      logger.error(`ImageKit upload SDK error: ${uploadError.message}`);
+      
+      // If there's an issue with the base64 data, try to convert it to a buffer and upload that way
+      if (uploadError.message.includes('base64') || uploadError.message.includes('data URI')) {
+        logger.info('Attempting to recover by converting base64 to buffer and uploading...');
+        
+        try {
+          // Try to extract raw base64 from data URI
+          const base64Content = base64Data.split(',')[1] || base64Data;
+          const imageBuffer = Buffer.from(base64Content, 'base64');
+          
+          if (imageBuffer.length > 0) {
+            logger.info(`Successfully converted base64 to buffer (${imageBuffer.length} bytes)`);
+            
+            // Use uploadImage function to upload the buffer instead
+            return await uploadImage(imageBuffer, fileName, options);
+          } else {
+            logger.error('Converted buffer is empty, recovery failed');
+            throw uploadError;  // Rethrow original error
+          }
+        } catch (recoveryError) {
+          logger.error(`Recovery attempt failed: ${recoveryError.message}`);
+          throw uploadError;  // Rethrow original error
         }
+      } else {
+        // Rethrow for other types of errors
+        throw uploadError;
       }
-      
-      // Use the uploadImage function with the buffer
-      logger.debug(`Proceeding to upload buffer to ImageKit with filename: ${finalFileName}`);
-      return await uploadImage(imageBuffer, finalFileName, options);
-      
-    } catch (bufferError) {
-      logger.error(`Buffer conversion error: ${bufferError.message}`);
-      logger.error(`Buffer error stack: ${bufferError.stack}`);
-      throw new Error(`Failed to process base64 data: ${bufferError.message}`);
     }
-    
   } catch (error) {
     logger.error(`Error uploading base64 image to ImageKit: ${error.message}`);
-    logger.error(`Base64 upload error stack: ${error.stack}`);
     throw error;
   }
 };

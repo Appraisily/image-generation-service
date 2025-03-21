@@ -130,6 +130,13 @@ const imageUploader = {
             // Create a function to read a stream into a buffer
             const streamToBuffer = (stream) => {
               return new Promise((resolve, reject) => {
+                // First check if stream is actually readable
+                if (!stream.readable) {
+                  logger.warn('Stream is not in readable state - attempting recovery with empty buffer');
+                  resolve(Buffer.alloc(0));
+                  return;
+                }
+                
                 const chunks = [];
                 
                 // Safer event attachment with error handling
@@ -193,14 +200,37 @@ const imageUploader = {
         } catch (streamError) {
           logger.error(`Failed to process stream: ${streamError.message}`);
           
-          // Try to recover - check if the stream has a direct buffer property we can use
+          // More detailed error logging to help diagnose the issue
+          logger.error(`Stream error stack: ${streamError.stack}`);
+          
+          // Try multiple recovery mechanisms
+          let recovered = false;
+          
+          // Recovery method 1: Check for buffer property
           if (data.buffer && Buffer.isBuffer(data.buffer)) {
             logger.info('Recovering using stream.buffer property');
             processedData = data.buffer;
             logger.info(`Recovery successful: ${processedData.length} bytes`);
-          } else {
-            // Instead of throwing an error, create an empty buffer
-            logger.warn(`Stream data cannot be processed: ${streamError.message}. Creating empty buffer fallback.`);
+            recovered = true;
+          } 
+          // Recovery method 2: Check for _readableState buffer 
+          else if (data._readableState && data._readableState.buffer) {
+            logger.info('Recovering using _readableState.buffer property');
+            try {
+              const bufferObj = data._readableState.buffer;
+              if (bufferObj && typeof bufferObj.slice === 'function') {
+                processedData = Buffer.from(bufferObj.slice());
+                logger.info(`Recovery from internal buffer successful: ${processedData.length} bytes`);
+                recovered = true;
+              }
+            } catch (bufferError) {
+              logger.error(`Failed to recover from internal buffer: ${bufferError.message}`);
+            }
+          }
+          
+          // If all recovery methods failed, create empty buffer and continue
+          if (!recovered) {
+            logger.warn(`No recovery method succeeded. Creating empty buffer fallback.`);
             processedData = Buffer.alloc(0);
             logger.info('Created empty buffer as fallback');
           }
@@ -222,6 +252,34 @@ const imageUploader = {
               if (Buffer.isBuffer(processedData)) {
                 processedData = processedData.toString('base64');
                 logger.debug(`Converted Buffer to base64 string. New length: ${processedData.length}`);
+              } else if (processedData instanceof Uint8Array) {
+                // Handle Uint8Array conversion
+                processedData = Buffer.from(processedData).toString('base64');
+                logger.debug(`Converted Uint8Array to base64 string. New length: ${processedData.length}`);
+              } else if (processedData && typeof processedData === 'object') {
+                // Attempt to convert object to string
+                try {
+                  if (typeof processedData.toString === 'function') {
+                    // Try using toString() method
+                    const strData = processedData.toString();
+                    if (strData && strData !== '[object Object]') {
+                      processedData = strData;
+                      logger.debug(`Converted object to string using toString(). New value: ${processedData.substring(0, 50)}...`);
+                    } else {
+                      // toString() returned default value, try JSON stringify
+                      processedData = JSON.stringify(processedData);
+                      logger.debug(`Converted object to JSON string. New length: ${processedData.length}`);
+                      // This likely isn't base64, but we'll proceed and let error handling catch it
+                    }
+                  } else {
+                    // No toString() method, use JSON stringify
+                    processedData = JSON.stringify(processedData);
+                    logger.debug(`Converted object to JSON string. New length: ${processedData.length}`);
+                  }
+                } catch (conversionError) {
+                  logger.error(`Failed to convert object to string: ${conversionError.message}`);
+                  throw new Error(`Cannot convert data to base64 string: ${conversionError.message}`);
+                }
               } else {
                 throw new Error(`Unsupported data type for base64 upload: ${typeof processedData}. Must be a string or Buffer.`);
               }
@@ -230,6 +288,34 @@ const imageUploader = {
             // Check if this is a data URI and handle it properly
             if (processedData.startsWith('data:')) {
               logger.info('Detected base64 with data URI prefix, handling appropriately');
+              // Extract the MIME type if available for better extension handling
+              try {
+                const mimeMatch = processedData.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
+                if (mimeMatch && mimeMatch[1]) {
+                  const mimeType = mimeMatch[1];
+                  logger.debug(`Extracted MIME type from data URI: ${mimeType}`);
+                  
+                  // Add file extension to fileName if it doesn't have one
+                  if (fileName && !fileName.includes('.')) {
+                    const ext = mimeType === 'image/jpeg' ? '.jpg' : 
+                               mimeType === 'image/png' ? '.png' : 
+                               mimeType === 'image/gif' ? '.gif' : 
+                               mimeType === 'image/webp' ? '.webp' : '.jpg';
+                    fileName += ext;
+                    logger.debug(`Added file extension based on MIME type: ${fileName}`);
+                  }
+                }
+                
+                // Check for proper base64 content
+                const base64Content = processedData.split(',')[1];
+                if (!base64Content || base64Content.trim().length === 0) {
+                  logger.error('Invalid data URI: missing base64 content after comma');
+                  throw new Error('Invalid data URI: missing base64 content');
+                }
+              } catch (mimeError) {
+                logger.warn(`Error parsing MIME type from data URI: ${mimeError.message}`);
+                // Continue without MIME type extraction
+              }
               // The imagekitClient.uploadImageFromBase64 will handle the data URI correctly
             } else {
               // Validate base64 string format (basic check)
@@ -247,6 +333,13 @@ const imageUploader = {
                   logger.warn(`Failed to clean base64 string: ${cleanError.message}`);
                   // Continue with the original string
                 }
+              }
+              
+              // Add data URI prefix if missing
+              if (!processedData.startsWith('data:')) {
+                // Default to image/jpeg if we can't determine the type
+                processedData = `data:image/jpeg;base64,${processedData}`;
+                logger.debug('Added data URI prefix (image/jpeg) to base64 string');
               }
             }
             
