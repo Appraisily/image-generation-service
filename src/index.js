@@ -659,8 +659,33 @@ app.get('/api/prompt/:appraiserId', async (req, res) => {
 
 // Upload image endpoint
 app.post('/api/upload', async (req, res) => {
+  // Create a buffer to store the raw body data
+  let rawData = '';
+  let rawBodyPromise = new Promise((resolve) => {
+    req.on('data', (chunk) => {
+      rawData += chunk.toString();
+    });
+    req.on('end', () => {
+      resolve(rawData);
+    });
+  });
+  
   try {
-    const { source, data, fileName, folder, tags, metadata } = req.body;
+    // Wait for the raw body to be fully received
+    const rawBody = await rawBodyPromise;
+    let parsedBody;
+    
+    try {
+      parsedBody = JSON.parse(rawBody);
+    } catch (jsonError) {
+      logger.error(`Error parsing JSON body: ${jsonError.message}`);
+      return res.status(400).json({ 
+        error: 'Invalid JSON in request body',
+        details: jsonError.message
+      });
+    }
+    
+    const { source, data, fileName, folder, tags, metadata } = parsedBody;
     
     // Validate required fields
     if (!source || !data) {
@@ -680,95 +705,66 @@ app.post('/api/upload', async (req, res) => {
     
     logger.info(`Received image upload request. Source: ${source}, Folder: ${folder || 'default'}`);
     
-    // Enhanced debug information about the data being received
-    const dataType = typeof data;
-    let isBuffer = Buffer.isBuffer(data);
-    const isStream = data && typeof data === 'object' && typeof data.pipe === 'function';
-    
-    logger.debug(`Image data details: Type: ${dataType}, IsBuffer: ${isBuffer}, IsStream: ${isStream}, Length: ${isBuffer ? data.length : (typeof data === 'string' ? data.length : 'unknown')}, HasToJSON: ${data && typeof data.toJSON === 'function'}`);
-    
-    // For JSON endpoints, Buffers are automatically serialized to objects with type: "Buffer", data: [...]
-    // In such cases, we need to convert back to a real Buffer
-    let processedData = data;
-    let processedSource = source;
-    
-    if (dataType === 'object' && !isBuffer && !isStream && data?.type === 'Buffer' && Array.isArray(data.data)) {
-      logger.info('Detected serialized Buffer object, converting back to Buffer');
+    // Custom handling for base64 data to avoid streaming issues
+    if (source.toLowerCase() === 'base64') {
       try {
-        processedData = Buffer.from(data.data);
-        logger.info(`Successfully converted serialized Buffer to real Buffer: ${processedData.length} bytes`);
-        isBuffer = true; // Update the flag since we now have a buffer
-      } catch (bufferError) {
-        logger.error(`Failed to convert serialized Buffer: ${bufferError.message}`);
-      }
-    }
-  
-    // CASE 1: Handle stream data
-    if (isStream) {
-      logger.info(`Detected stream data. Proceeding with imageUploader handling...`);
-      // Let the imageUploader handle this - our new code can handle streams properly
-      // We'll just ensure the source is marked as buffer
-      if (source.toLowerCase() === 'stream') {
-        logger.info('Changing source type from stream to buffer for processing');
-        processedSource = 'buffer';
-      }
-    }
-    
-    // CASE 2: Handle base64 encoded string with data URI prefix
-    if (source.toLowerCase() === 'base64' && typeof processedData === 'string' && processedData.startsWith('data:')) {
-      logger.info('Detected base64 string with data URI prefix');
-      // No need to modify - imageUploader service will handle this format
-    }
-    
-    // CASE 3: If we receive a buffer for a base64 source, convert it to base64 string
-    if (source.toLowerCase() === 'base64' && isBuffer) {
-      logger.info(`Converting buffer to base64 string for base64 source type`);
-      processedData = processedData.toString('base64');
-    }
-    
-    // CASE 4: If we receive an object that's not a buffer for base64 source, try to handle it
-    if (source.toLowerCase() === 'base64' && dataType === 'object' && !isBuffer && !isStream) {
-      logger.warn(`Received object for base64 source that is not a buffer. Attempting to stringify...`);
-      try {
-        if (typeof processedData.toString === 'function') {
-          processedData = processedData.toString();
-          logger.info('Converted object to string using toString()');
-        } else {
-          processedData = JSON.stringify(processedData);
-          logger.warn(`Converted object to string using JSON.stringify, but this may not be valid base64`);
+        // For base64 data, check if it has the data URI prefix
+        let base64Content = data;
+        if (data.startsWith('data:')) {
+          // Extract the base64 part after the comma
+          const base64Parts = data.split(',');
+          if (base64Parts.length > 1) {
+            base64Content = base64Parts[1];
+          } else {
+            logger.warn('Base64 data URI format is invalid, attempting to use as is');
+          }
         }
-      } catch (jsonError) {
-        logger.error(`Failed to stringify object: ${jsonError.message}`);
-        return res.status(400).json({
-          error: 'Invalid base64 data',
-          help: 'For base64 source, data must be a valid base64 string'
+        
+        try {
+          // Try to upload via imagekit client
+          logger.info(`Attempting to upload base64 data (${base64Content.length} chars)`);
+          const result = await imageUploader.uploadFromBase64String(base64Content, fileName, folder, tags, metadata);
+          
+          return res.status(200).json({
+            success: true,
+            data: result
+          });
+        } catch (uploadError) {
+          logger.error(`Error in base64 upload: ${uploadError.message}`);
+          return res.status(500).json({
+            error: `Failed to upload base64 image: ${uploadError.message}`
+          });
+        }
+      } catch (base64Error) {
+        logger.error(`Error processing base64 data: ${base64Error.message}`);
+        return res.status(500).json({
+          error: `Error processing base64 data: ${base64Error.message}`
         });
       }
-    }
-    
-    try {
-      // Upload the image with the processed data
-      const result = await imageUploader.uploadImage({
-        source: processedSource || source,
-        data: processedData || data,
-        fileName: fileName || `upload_${Date.now()}`,
-        folder: folder || 'uploaded-images',
-        tags: tags || [],
-        metadata: metadata || {},
-        useUniqueFileName: true
-      });
-      
-      return res.status(200).json({
-        success: true,
-        data: result
-      });
-      
-    } catch (error) {
-      logger.error(`Error uploading image: ${error.message}`);
-      logger.error(`Error stack: ${error.stack}`);
-      return res.status(500).json({ 
-        error: `Failed to upload image: ${error.message}` 
-      });
+    } else {
+      // For URL uploads or other types, use the existing uploadImage method
+      try {
+        const result = await imageUploader.uploadImage({
+          source: source,
+          data: data,
+          fileName: fileName || `upload_${Date.now()}`,
+          folder: folder || 'uploaded-images',
+          tags: tags || [],
+          metadata: metadata || {},
+          useUniqueFileName: true
+        });
+        
+        return res.status(200).json({
+          success: true,
+          data: result
+        });
+      } catch (error) {
+        logger.error(`Error uploading image: ${error.message}`);
+        logger.error(`Error stack: ${error.stack}`);
+        return res.status(500).json({ 
+          error: `Failed to upload image: ${error.message}` 
+        });
+      }
     }
   } catch (error) {
     logger.error(`API error in upload endpoint: ${error.message}`);

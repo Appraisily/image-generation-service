@@ -449,7 +449,106 @@ const imageUploader = {
         reject(error);
       });
     });
-  }
+  },
+
+  /**
+   * Upload from base64 string directly to avoid stream issues
+   * @param {String} base64String - The raw base64 string (without data URI prefix)
+   * @param {String} fileName - The filename to use
+   * @param {String} folder - Target folder in ImageKit
+   * @param {Array} tags - Array of tags to apply
+   * @param {Object} metadata - Additional metadata
+   * @returns {Promise<Object>} Upload result with URL
+   */
+  async uploadFromBase64String(base64String, fileName, folder, tags = [], metadata = {}) {
+    try {
+      logger.info(`Processing direct base64 string upload, length: ${base64String?.length || 0}`);
+      
+      if (!base64String || typeof base64String !== 'string') {
+        throw new Error('Base64 string is required and must be a string');
+      }
+      
+      // Clean the base64 string (remove whitespace and non-base64 characters)
+      const cleanedBase64 = base64String.replace(/[^A-Za-z0-9+/=]/g, '');
+      
+      if (cleanedBase64.length < base64String.length) {
+        logger.info(`Cleaned base64 string: removed ${base64String.length - cleanedBase64.length} invalid characters`);
+      }
+      
+      // Convert base64 to buffer
+      let imageBuffer;
+      try {
+        imageBuffer = Buffer.from(cleanedBase64, 'base64');
+        logger.info(`Converted base64 to buffer: ${imageBuffer.length} bytes`);
+        
+        if (imageBuffer.length === 0) {
+          logger.warn('Converted buffer is empty, base64 string may be invalid');
+        }
+      } catch (bufferError) {
+        logger.error(`Error converting base64 to buffer: ${bufferError.message}`);
+        throw new Error(`Failed to convert base64 to buffer: ${bufferError.message}`);
+      }
+      
+      // Detect MIME type from the buffer if possible
+      let mimeType = 'image/jpeg'; // Default
+      if (imageBuffer.length > 2) {
+        const header = imageBuffer.slice(0, 2).toString('hex');
+        if (header === 'ffd8') {
+          mimeType = 'image/jpeg';
+        } else if (header === '8950') {
+          mimeType = 'image/png';
+        } else if (header === '4749') {
+          mimeType = 'image/gif';
+        }
+        logger.info(`Detected MIME type from buffer: ${mimeType}`);
+      }
+      
+      // Ensure fileName has proper extension
+      if (fileName && !fileName.includes('.')) {
+        const ext = mimeType === 'image/jpeg' ? '.jpg' : 
+                    mimeType === 'image/png' ? '.png' : 
+                    mimeType === 'image/gif' ? '.gif' : '.jpg';
+        fileName += ext;
+        logger.info(`Added extension to filename: ${fileName}`);
+      }
+      
+      // Upload directly using imagekit client
+      const client = await imagekitClient.ensureImageKitClient();
+      
+      logger.info(`Uploading to ImageKit using client. File: ${fileName}, Folder: ${folder}`);
+      const uploadOptions = {
+        file: imageBuffer,
+        fileName: fileName || `upload_${Date.now()}.jpg`,
+        folder: folder || 'uploaded-images',
+        useUniqueFileName: true,
+        tags: tags || [],
+        metadata: metadata || {}
+      };
+      
+      logger.info(`Calling ImageKit client with options: ${JSON.stringify({
+        ...uploadOptions,
+        file: `<Buffer of ${imageBuffer.length} bytes>`
+      })}`);
+      
+      const response = await client.upload(uploadOptions);
+      
+      if (!response || !response.url) {
+        throw new Error('Failed to get URL from ImageKit upload response');
+      }
+      
+      logger.info(`Successfully uploaded image to ImageKit: ${response.url}`);
+      return {
+        url: response.url,
+        fileId: response.fileId,
+        name: response.name,
+        size: response.size || imageBuffer.length
+      };
+    } catch (error) {
+      logger.error(`Error in uploadFromBase64String: ${error.message}`);
+      logger.error(`Error stack: ${error.stack}`);
+      throw error;
+    }
+  },
 };
 
 module.exports = imageUploader;
