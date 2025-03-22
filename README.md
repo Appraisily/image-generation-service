@@ -143,10 +143,50 @@ Upload an image from a URL, base64 data, or buffer to ImageKit.
 }
 ```
 
-#### Important Notes for Upload
+#### Important Notes for Upload - UPDATED
+- **RECOMMENDED**: When uploading images, use the base64 source type rather than URLs for improved reliability in Cloud Run
+- **IMPORTANT**: Always ensure that base64 data is properly formatted and doesn't contain special characters
 - When using `source: "buffer"`, the `data` must be a Buffer or base64 string representation of the buffer
-- Do not attempt to send a stream directly through the API - convert streams to buffers on the client side first
-- For large images, consider using the URL source type rather than base64 or buffer
+- Do not attempt to send a stream directly through the API - convert streams to buffers or base64 on the client side first
+- For large images, consider breaking them into smaller chunks or use the multipart upload endpoint
+- **For Node.js clients**: If you're getting "stream is not readable" errors in Cloud Run, use the following pattern:
+  ```javascript
+  // Convert image to base64 string first
+  const base64Data = fs.readFileSync('/path/to/image.jpg').toString('base64');
+  
+  // Send as base64 data
+  const response = await axios.post('https://image-generation-service-856401495068.us-central1.run.app/api/upload', {
+    source: 'base64',
+    data: base64Data,
+    fileName: 'my-image.jpg'
+  });
+  ```
+
+### 5. Multipart Upload (New)
+`POST /api/upload-multipart`
+
+Upload an image using multipart form data. This is useful for avoiding stream issues in Cloud Run.
+
+#### Request
+Send a `multipart/form-data` request with the following fields:
+- `file`: The image file to upload (required)
+- `folder`: Target folder in ImageKit (optional, defaults to 'uploaded-images')
+- `fileName`: Custom filename (optional, defaults to timestamp-based name)
+- `tags`: JSON array of tags (optional)
+- `metadata`: JSON object with metadata (optional)
+
+#### Example with form-data
+```javascript
+const form = new FormData();
+form.append('file', fs.createReadStream('/path/to/image.jpg'));
+form.append('folder', 'my-folder');
+form.append('fileName', 'custom-name.jpg');
+
+const response = await axios.post('https://image-generation-service-856401495068.us-central1.run.app/api/upload-multipart', 
+  form, 
+  { headers: { ...form.getHeaders() } }
+);
+```
 
 #### Response
 ```json
@@ -161,7 +201,7 @@ Upload an image from a URL, base64 data, or buffer to ImageKit.
 }
 ```
 
-### 5. Get Prompt for Appraiser
+### 6. Get Prompt for Appraiser
 `GET /api/prompt/:appraiserId`
 
 Retrieve the prompt used to generate an appraiser's image.
@@ -176,7 +216,7 @@ Retrieve the prompt used to generate an appraiser's image.
 }
 ```
 
-### 6. Health Check
+### 7. Health Check
 `GET /health`
 
 Check the service's health and configuration status.
@@ -193,7 +233,7 @@ Check the service's health and configuration status.
 }
 ```
 
-### 7. API Documentation
+### 8. API Documentation
 `GET /api/docs`
 
 Get detailed API documentation in JSON format.
@@ -229,15 +269,17 @@ Generated images are stored and served through ImageKit CDN for optimal delivery
 4. Implement proper error handling in your client code
 5. Cache the returned image URLs on your end when possible
 6. For custom images, use the `/api/upload` endpoint to directly upload images to ImageKit
-7. When uploading streams, convert them to buffers or base64 first on the client side
-8. Use appropriate source types for data: "url" for URLs, "base64" for base64 strings, "buffer" for binary data
+7. **IMPORTANT**: In Cloud Run, avoid uploading streams directly - convert to base64 strings first
+8. Use the `/api/upload-multipart` endpoint for form-data uploads when dealing with large files
 9. Implement request timeouts and retry logic in your client applications
 10. Monitor response times and implement circuit breakers for high-traffic applications
 
 ## Recent Improvements
 
 ### Stream Handling Improvements
-- Fixed "stream is not readable" errors when uploading images
+- **FIXED**: "Stream is not readable" errors in Cloud Run environment
+- Added new `/api/upload-multipart` endpoint with busboy for more reliable multipart uploads
+- Enhanced `/api/upload` endpoint to better handle base64 data
 - Added validation for stream readability before attempting to read from streams
 - Added better error recovery when streams are in an invalid state
 - Enhanced stream-to-buffer conversion with proper timeouts and cleanup
@@ -260,6 +302,37 @@ Generated images are stored and served through ImageKit CDN for optimal delivery
 - Implemented health check endpoints with detailed status reporting
 - Added automated scaling based on request volume
 - Improved CI/CD pipeline for faster deployments
+
+## Troubleshooting
+
+### Fixing "Stream is not readable" Errors
+If you're encountering "stream is not readable" errors when uploading images, follow these steps:
+
+1. **PREFERRED APPROACH**: Use base64 encoding with the `/api/upload` endpoint
+   ```javascript
+   // Convert your image to base64 string first
+   const base64Data = fs.readFileSync('/path/to/image.jpg').toString('base64');
+   
+   // Send using the base64 source type
+   const response = await axios.post('/api/upload', {
+     source: 'base64',
+     data: base64Data,
+     fileName: 'my-image.jpg'
+   });
+   ```
+
+2. **ALTERNATIVE APPROACH**: Use the multipart upload endpoint
+   ```javascript
+   const form = new FormData();
+   form.append('file', fs.createReadStream('/path/to/image.jpg'));
+   form.append('fileName', 'my-image.jpg');
+   
+   const response = await axios.post('/api/upload-multipart', form, {
+     headers: { ...form.getHeaders() }
+   });
+   ```
+
+3. For URL-based uploads, ensure the URL is publicly accessible
 
 ## Installation & Deployment
 
